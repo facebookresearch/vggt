@@ -1,0 +1,7 @@
+student:
+  arch: vit_giant2
+  patch_size: 14
+  ffn_layer: swiglufused
+crops:
+  global_crops_size: 518  # this is to set up the position embeddings properly
+  local_crops_size: 98

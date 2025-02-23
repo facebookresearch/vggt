@@ -2,9 +2,6 @@ import numpy as np
 import torch
 
 
-
-
-
 class PositionGetter(object):
     """ return positions of patches """
 
@@ -110,6 +107,9 @@ def interpolate_pos_embed(model, checkpoint_model):
 #----------------------------------------------------------
 # RoPE2D: RoPE implementation in 2D
 #----------------------------------------------------------
+
+# borrowed from https://github.com/naver/dust3r
+# todo: replace with our official implementation
 
 class RoPE2D(torch.nn.Module):
     def __init__(self, freq=100.0, F0=1.0):

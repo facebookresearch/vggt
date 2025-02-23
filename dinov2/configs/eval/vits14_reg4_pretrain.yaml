@@ -1,0 +1,9 @@
+student:
+  arch: vit_small
+  patch_size: 14
+  num_register_tokens: 4
+  interpolate_antialias: true
+  interpolate_offset: 0.0
+crops:
+  global_crops_size: 518  # this is to set up the position embeddings properly
+  local_crops_size: 98

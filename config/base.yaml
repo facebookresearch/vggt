@@ -1,0 +1,95 @@
+SCENE_DIR: examples/room/
+# apple
+# cake
+
+_target_: vggt.models.vggt.VGGT #off3d.models.vggt.vggt.VGGT
+
+num_register_tokens: 4  # 0 for no register tokens
+ffn_layer: "mlp"
+qk_norm: False # NOTE: is this correct?
+patch_size: 14
+init_values: 0.01
+
+AGGREGATOR:
+  _target_: vggt.models.aggregator.Aggregator
+  patch_embed_by_conv: False
+  image_size: 518
+  use_checkpoint: True
+  use_reentrant: False
+  decoder_load_dino: False
+  backbone_qk_norm: False
+  aa_block_kwargs:
+      dim: 1024
+      num_heads: 16
+      mlp_ratio: 4
+      qkv_bias: True
+      proj_bias: True
+      ffn_bias: True
+      drop: 0.0
+      attn_drop: 0.0
+      init_values: 0.01
+      drop_path: 0.0
+      fused_attn: True
+      qk_norm: True
+      rope_freq: 100
+
+
+CameraHead:
+  _target_: vggt.heads.camera_head.CameraHead #off3d.models.vggt.camera_head.CameraHead
+  pose_encoding_type:  "absT_quaR_FoV" 
+  new_trunk: True
+  trunk_depth: 4
+  # proj_dim: 768
+  qk_norm: True
+  init_values: 0.01
+  act_dict:
+    trans_act: "linear"
+    quat_act: "linear"
+    fl_act: "linear"
+  loss_kwargs:
+    loss_type: "l1"
+    gamma: 0.6
+
+
+PointHead:
+  _target_: vggt.heads.dpt_head.DPTHead #off3d.models.vggt.dpt_head.DPTHead
+  # _target_: off3d.models.vggt.linear_head.LinearHead
+  dim_in: 2048
+  shallow_conv: False
+  normalize_act: "inv_log"
+  pos_embed: True
+  loss_kwargs:
+    gradient_loss: "normal"
+    # gradient_loss: "grad"
+    normalize_pred: False
+    valid_range: 0.98
+    gamma: 1.0
+    camera_centric_reg: -1.0
+    all_mean: True
+
+DepthHead: null
+  # _target_: vggt.heads.dpt_head.DPTHead #off3d.models.vggt.dpt_head.DPTHead
+  # # _target_: off3d.models.vggt.linear_head.LinearHead
+  # dim_in: 2048
+  # patch_size: ${patch_size}
+  # output_dim: 2
+  # normalize_act: "exp"  # or just relu?
+  # normalize_act_conf: "expp1"
+  # pos_embed: True
+  # loss_kwargs: 
+  #   loss_type: "conf"
+  #   predict_disparity: False  # or True
+  #   gradient_loss: "grad"
+  #   valid_range: 0.98
+  #   gamma: 1.0
+  #   all_mean: True
+
+MatchHead: null
+TrackHead: null
+
+
+
+hydra:
+  output_subdir: NULL
+  run:
+    dir: .

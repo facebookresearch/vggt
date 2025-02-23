@@ -1,0 +1,12 @@
+hydra-core==1.3.2
+# accelerate==0.24.0
+scipy
+omegaconf 
+opencv-python 
+einops 
+# git+https://github.com/cvg/LightGlue.git#egg=LightGlue
+numpy==1.26.3
+# pycolmap==0.6.1
+# https://huggingface.co/facebook/VGGSfM/resolve/main/poselib-2.0.2-cp310-cp310-linux_x86_64.whl
+trimesh
+open3d
