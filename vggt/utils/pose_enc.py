@@ -1,5 +1,5 @@
 import torch
-from off3d.utils.rotation import quat_to_mat, mat_to_quat
+from .rotation import quat_to_mat, mat_to_quat
 # from off3d.utils.metric import closed_form_inverse_OpenCV
 
 

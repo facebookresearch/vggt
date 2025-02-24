@@ -14,8 +14,9 @@ from omegaconf import DictConfig, OmegaConf
 import glob
 import gc
 import time
+from viser_fn import viser_wrapper
 
-def vggsfm_demo(
+def vggt_demo(
     input_video,
     input_image,
 ):
@@ -23,13 +24,10 @@ def vggsfm_demo(
     gc.collect()
     torch.cuda.empty_cache()
 
-    import pdb; pdb.set_trace()
+    
     debug = False
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-
-    max_input_image = 25
-
     target_dir = f"input_images_{timestamp}"
     if os.path.exists(target_dir): 
         shutil.rmtree(target_dir)
@@ -39,74 +37,57 @@ def vggsfm_demo(
     os.makedirs(target_dir_images)
 
 
-    if debug:
-        predictions = torch.load("predictions_scene2.pth")
-    else:
+    if input_video is not None:            
+        if not isinstance(input_video, str):
+            input_video = input_video["video"]["path"]
+    
+    cfg_file = "config/base.yaml"
+    cfg = OmegaConf.load(cfg_file)
+
+    if input_image is not None:
+        input_image = sorted(input_image)        
+        recon_num = len(input_image)
+
+        # Copy files to the new directory
+        for file_name in input_image:
+            shutil.copy(file_name, target_dir_images)
+    elif input_video is not None:
+        vs = cv2.VideoCapture(input_video)
+
+        fps = vs.get(cv2.CAP_PROP_FPS)
+
+        frame_rate = 1
+        frame_interval = int(fps * frame_rate)
         
-        if input_video is not None:            
-            if not isinstance(input_video, str):
-                input_video = input_video["video"]["path"]
+        video_frame_num = 0
+        count = 0 
         
-        cfg_file = "vggsfm_code/cfgs/demo.yaml"
-        cfg = OmegaConf.load(cfg_file)
+        while True:
+            (gotit, frame) = vs.read()
+            count +=1
 
-        if input_image is not None:
-
-            input_image = sorted(input_image)
-            input_image = input_image[:max_input_image]
+            if not gotit:
+                break
             
-            recon_num = len(input_image)
-            if recon_num<3:
-                return None, "Please input at least three frames"
-
-            # Copy files to the new directory
-            for file_name in input_image:
-                shutil.copy(file_name, target_dir_images)
-        elif input_video is not None:
-            vs = cv2.VideoCapture(input_video)
-
-            fps = vs.get(cv2.CAP_PROP_FPS)
-
-            frame_rate = 1
-            frame_interval = int(fps * frame_rate)
-            
-            video_frame_num = 0
-            count = 0 
-            
-            while video_frame_num<max_input_image:
-                (gotit, frame) = vs.read()
-                count +=1
-
-                if not gotit:
-                    break
+            if count % frame_interval == 0:
+                cv2.imwrite(target_dir_images+"/"+f"{video_frame_num:06}.png", frame)
+                video_frame_num+=1
                 
-                if count % frame_interval == 0:
-                    cv2.imwrite(target_dir_images+"/"+f"{video_frame_num:06}.png", frame)
-                    video_frame_num+=1
-                    
-            recon_num = video_frame_num     
-            if recon_num<3:
-                return None, "Please input at least three frames"
-        else:
-            return None, "Uploading not finished or Incorrect input format"
-            
-        cfg.query_frame_num = query_frame_num
-        cfg.max_query_pts = max_query_pts
-        print(f"Files have been copied to {target_dir_images}")
-        cfg.SCENE_DIR = target_dir
+        recon_num = video_frame_num     
+        if recon_num<3:
+            return None, "Please input at least three frames"
+    else:
+        return None, "Uploading not finished or Incorrect input format"
         
-        # try:
-        predictions = demo_fn(cfg)
-        # except:
-        # return None, "Something seems to be incorrect. Please verify that your inputs are formatted correctly. If the issue persists, kindly create a GitHub issue for further assistance."
+        
+    print(f"Files have been copied to {target_dir_images}")
+    cfg.SCENE_DIR = target_dir
     
-    glbscene = vggsfm_predictions_to_glb(predictions)
-    
-    glbfile = target_dir + "/glbscene.glb"
-    glbscene.export(file_obj=glbfile) 
-    # glbscene.export(file_obj=glbfile, line_settings= {'point_size': 20})    
+    predictions = demo_fn(cfg)
 
 
+    viser_wrapper(predictions)
+    
     del predictions
     gc.collect()
     torch.cuda.empty_cache()
@@ -118,9 +99,8 @@ def vggsfm_demo(
     print(f"Execution time: {execution_time} seconds")
     
     
-    # glbscene.geometry['geometry_0'].colors.max()
-    # recon_num
-    return glbfile, f"Reconstruction complete ({recon_num} frames)"
+    # what should I return here?
+    return 
 
 
 
@@ -184,11 +164,7 @@ with gr.Blocks() as demo:
         with gr.Column(scale=1):
             input_video = gr.Video(label="Upload Video", interactive=True)
             input_images = gr.File(file_count="multiple", label="Upload Images", interactive=True)
-            # num_query_images = gr.Slider(minimum=1, maximum=10, step=1, value=4, label="Number of query images (key frames)",
-            #                              info="More query images usually lead to better reconstruction at a lower speed. If the viewpoint differences between your images are minimal, you can set this value to 1. ")
-            # num_query_points = gr.Slider(minimum=600, maximum=6000, step=1, value=2048, label="Number of query points",
-            #                              info="More query points usually lead to denser reconstruction at a lower speed.")
-        
+
         with gr.Column(scale=3):
             reconstruction_output = gr.Model3D(label="3D Reconstruction (Point Cloud and Camera Poses; Zoom in to see details)", height=520, zoom_speed=0.5, pan_speed=0.5)
             log_output = gr.Textbox(label="Log")
@@ -196,24 +172,23 @@ with gr.Blocks() as demo:
     with gr.Row():
         submit_btn = gr.Button("Reconstruct", scale=1)
 
-        # submit_btn = gr.Button("Reconstruct", scale=1, elem_attributes={"style": "background-color: blue; color: white;"})
-        clear_btn = gr.ClearButton([input_video, input_images, num_query_images, num_query_points, reconstruction_output, log_output], scale=1)
+        clear_btn = gr.ClearButton([input_video, input_images, reconstruction_output, log_output], scale=1)
     
     
     
     
     examples = [
-        [flower_video, flower_images, 2, 4096],
-        [kitchen_video, kitchen_images, 4, 2048],
-        [person_video, person_images, 3, 2048],
-        [statue_video, statue_images, 4, 2048],
-        [drums_video, drums_images, 4, 2048],
-        [counter_video, counter_images, 4, 2048],
-        [fern_video, fern_images, 2, 4096],
-        [horns_video, horns_images, 3, 4096],
-        [apple_video, apple_images, 6, 2048],
-        # [british_museum_video, british_museum_images, 1, 4096],
-        [bonsai_video, bonsai_images, 3, 2048],
+        [flower_video, flower_images],
+        [kitchen_video, kitchen_images],
+        [person_video, person_images],
+        [statue_video, statue_images],
+        [drums_video, drums_images],
+        [counter_video, counter_images],
+        [fern_video, fern_images],
+        [horns_video, horns_images],
+        [apple_video, apple_images],
+        # [british_museum_video, british_museum_images],
+        [bonsai_video, bonsai_images],
         # [face_video, face_images, 4, 2048],
         # [cake_video, cake_images, 3, 2048],
     ]
@@ -221,17 +196,17 @@ with gr.Blocks() as demo:
     
     
     gr.Examples(examples=examples, 
-                inputs=[input_video, input_images, num_query_images, num_query_points],
+                inputs=[input_video, input_images],
                 outputs=[reconstruction_output, log_output],  # Provide outputs
-                fn=vggsfm_demo,  # Provide the function
+                fn=vggt_demo,  # Provide the function
                 cache_examples=False,
                 examples_per_page=50,
                 )
 
 
     submit_btn.click(
-        vggsfm_demo,
-        [input_video, input_images, num_query_images, num_query_points],
+        vggt_demo,
+        [input_video, input_images],
         [reconstruction_output, log_output],
         concurrency_limit=1
     )

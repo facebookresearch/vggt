@@ -135,13 +135,16 @@ def viser_wrapper(
     )
 
 
+    init_conf_mask = conf > 3
+
     # point_mask = np.random.choice(points.shape[0], gui_points.value, replace=False)
     point_cloud = server.scene.add_point_cloud(
         name="viser_pcd",
-        points=points,
-        colors=colors,
+        points=points[init_conf_mask],
+        colors=colors[init_conf_mask],
         point_size=gui_point_size.value,
     )
+
 
 
     frames: List[viser.FrameHandle] = []

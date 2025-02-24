@@ -156,3 +156,24 @@
 [2025-02-23 04:01:42,539][websockets.server][INFO] - connection rejected (200 OK)
 [2025-02-23 04:01:43,372][websockets.server][INFO] - connection rejected (200 OK)
 [2025-02-23 04:01:43,716][websockets.server][INFO] - connection rejected (200 OK)
+[2025-02-23 04:32:56,201][dinov2][INFO] - using MLP layer as FFN
+[2025-02-23 04:33:01,868][dinov2][INFO] - using MLP layer as FFN
+[2025-02-23 04:34:18,658][dinov2][INFO] - using MLP layer as FFN
+[2025-02-23 04:34:23,615][dinov2][INFO] - using MLP layer as FFN
+[2025-02-23 04:34:56,874][websockets.server][INFO] - server listening on 0.0.0.0:8080
+[2025-02-23 04:35:18,293][websockets.server][INFO] - connection rejected (200 OK)
+[2025-02-23 04:35:18,591][websockets.server][INFO] - connection rejected (200 OK)
+[2025-02-23 04:35:18,643][websockets.server][INFO] - connection rejected (200 OK)
+[2025-02-23 04:35:19,301][websockets.server][INFO] - connection rejected (200 OK)
+[2025-02-23 04:35:19,394][websockets.server][INFO] - connection rejected (200 OK)
+[2025-02-23 04:35:19,396][websockets.server][INFO] - connection rejected (200 OK)
+[2025-02-23 04:35:19,399][websockets.server][INFO] - connection rejected (200 OK)
+[2025-02-23 04:35:19,477][websockets.server][INFO] - connection rejected (200 OK)
+[2025-02-23 04:35:19,565][websockets.server][INFO] - connection open
+[2025-02-23 04:35:19,749][websockets.server][INFO] - connection rejected (200 OK)
+[2025-02-23 04:35:19,750][websockets.server][INFO] - connection rejected (200 OK)
+[2025-02-23 04:35:19,753][websockets.server][INFO] - connection rejected (200 OK)
+[2025-02-23 04:35:19,834][websockets.server][INFO] - connection rejected (200 OK)
+[2025-02-23 04:35:20,200][websockets.server][INFO] - connection rejected (200 OK)
+[2025-02-23 04:35:24,341][websockets.server][INFO] - connection rejected (200 OK)
+[2025-02-23 04:35:25,084][websockets.server][INFO] - connection rejected (200 OK)

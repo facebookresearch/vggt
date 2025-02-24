@@ -3,7 +3,7 @@ import cv2
 import torch
 import numpy as np
 import gradio as gr
-import spaces
+# import spaces
 
 
 from gradio_util import vggsfm_predictions_to_glb
@@ -16,7 +16,7 @@ import shutil
 from datetime import datetime
 
 
-from vggsfm_code.hf_demo import demo_fn
+# from vggsfm_code.hf_demo import demo_fn
 from omegaconf import DictConfig, OmegaConf
 # from viz_utils.viz_fn import add_camera, apply_density_filter_np
 import glob
@@ -27,7 +27,7 @@ import time
 
 
 
-@spaces.GPU(duration=240)
+# @spaces.GPU(duration=240)
 def vggsfm_demo(
     input_video,
     input_image,
@@ -40,9 +40,9 @@ def vggsfm_demo(
 
     debug = False
 
+    print("hello"*100)
+    # import pdb; pdb.set_trace()
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-
-    max_input_image = 25
 
     target_dir = f"input_images_{timestamp}"
     if os.path.exists(target_dir): 
@@ -65,10 +65,7 @@ def vggsfm_demo(
         cfg = OmegaConf.load(cfg_file)
 
         if input_image is not None:
-
             input_image = sorted(input_image)
-            input_image = input_image[:max_input_image]
-            
             recon_num = len(input_image)
             if recon_num<3:
                 return None, "Please input at least three frames"
@@ -87,7 +84,7 @@ def vggsfm_demo(
             video_frame_num = 0
             count = 0 
             
-            while video_frame_num<max_input_image:
+            while True:
                 (gotit, frame) = vs.read()
                 count +=1
 
@@ -139,44 +136,86 @@ def vggsfm_demo(
 
 
 
-statue_video = "vggsfm_code/examples/videos/statue_video.mp4"
+statue_video = "examples/videos/statue_video.mp4"
 
-apple_video = "vggsfm_code/examples/videos/apple_video.mp4"
-british_museum_video = "vggsfm_code/examples/videos/british_museum_video.mp4"
-cake_video = "vggsfm_code/examples/videos/cake_video.mp4"
-bonsai_video = "vggsfm_code/examples/videos/bonsai_video.mp4"
-face_video =  "vggsfm_code/examples/videos/in2n_face_video.mp4"
-counter_video =  "vggsfm_code/examples/videos/in2n_counter_video.mp4"
+apple_video = "examples/videos/apple_video.mp4"
+british_museum_video = "examples/videos/british_museum_video.mp4"
+cake_video = "examples/videos/cake_video.mp4"
+bonsai_video = "examples/videos/bonsai_video.mp4"
+face_video =  "examples/videos/in2n_face_video.mp4"
+counter_video =  "examples/videos/in2n_counter_video.mp4"
 
-horns_video = "vggsfm_code/examples/videos/llff_horns_video.mp4"
-person_video = "vggsfm_code/examples/videos/in2n_person_video.mp4"
+horns_video = "examples/videos/llff_horns_video.mp4"
+person_video = "examples/videos/in2n_person_video.mp4"
 
-flower_video = "vggsfm_code/examples/videos/llff_flower_video.mp4"
+flower_video = "examples/videos/llff_flower_video.mp4"
 
-fern_video = "vggsfm_code/examples/videos/llff_fern_video.mp4"
+fern_video = "examples/videos/llff_fern_video.mp4"
 
-drums_video = "vggsfm_code/examples/videos/drums_video.mp4"
+drums_video = "examples/videos/drums_video.mp4"
 
-kitchen_video = "vggsfm_code/examples/videos/kitchen_video.mp4"
+kitchen_video = "examples/videos/kitchen_video.mp4"
 
 ###########################################################################################
-apple_images = glob.glob(f'vggsfm_code/examples/apple/images/*')
-bonsai_images = glob.glob(f'vggsfm_code/examples/bonsai/images/*')
-cake_images = glob.glob(f'vggsfm_code/examples/cake/images/*')
-british_museum_images = glob.glob(f'vggsfm_code/examples/british_museum/images/*')
-face_images = glob.glob(f'vggsfm_code/examples/in2n_face/images/*')
-counter_images = glob.glob(f'vggsfm_code/examples/in2n_counter/images/*')
+apple_images = glob.glob(f'examples/apple/images/*')
+bonsai_images = glob.glob(f'examples/bonsai/images/*')
+cake_images = glob.glob(f'examples/cake/images/*')
+british_museum_images = glob.glob(f'examples/british_museum/images/*')
+face_images = glob.glob(f'examples/in2n_face/images/*')
+counter_images = glob.glob(f'examples/in2n_counter/images/*')
 
-horns_images = glob.glob(f'vggsfm_code/examples/llff_horns/images/*')
+horns_images = glob.glob(f'examples/llff_horns/images/*')
 
-person_images = glob.glob(f'vggsfm_code/examples/in2n_person/images/*')
-flower_images = glob.glob(f'vggsfm_code/examples/llff_flower/images/*')
+person_images = glob.glob(f'examples/in2n_person/images/*')
+flower_images = glob.glob(f'examples/llff_flower/images/*')
 
-fern_images = glob.glob(f'vggsfm_code/examples/llff_fern/images/*')
-statue_images = glob.glob(f'vggsfm_code/examples/statue/images/*')
+fern_images = glob.glob(f'examples/llff_fern/images/*')
+statue_images = glob.glob(f'examples/statue/images/*')
 
-drums_images = glob.glob(f'vggsfm_code/examples/drums/images/*')
-kitchen_images = glob.glob(f'vggsfm_code/examples/kitchen/images/*')
+drums_images = glob.glob(f'examples/drums/images/*')
+kitchen_images = glob.glob(f'examples/kitchen/images/*')
+
+
+
+
+# statue_video = "vggsfm_code/examples/videos/statue_video.mp4"
+
+# apple_video = "vggsfm_code/examples/videos/apple_video.mp4"
+# british_museum_video = "vggsfm_code/examples/videos/british_museum_video.mp4"
+# cake_video = "vggsfm_code/examples/videos/cake_video.mp4"
+# bonsai_video = "vggsfm_code/examples/videos/bonsai_video.mp4"
+# face_video =  "vggsfm_code/examples/videos/in2n_face_video.mp4"
+# counter_video =  "vggsfm_code/examples/videos/in2n_counter_video.mp4"
+
+# horns_video = "vggsfm_code/examples/videos/llff_horns_video.mp4"
+# person_video = "vggsfm_code/examples/videos/in2n_person_video.mp4"
+
+# flower_video = "vggsfm_code/examples/videos/llff_flower_video.mp4"
+
+# fern_video = "vggsfm_code/examples/videos/llff_fern_video.mp4"
+
+# drums_video = "vggsfm_code/examples/videos/drums_video.mp4"
+
+# kitchen_video = "vggsfm_code/examples/videos/kitchen_video.mp4"
+
+# ###########################################################################################
+# apple_images = glob.glob(f'vggsfm_code/examples/apple/images/*')
+# bonsai_images = glob.glob(f'vggsfm_code/examples/bonsai/images/*')
+# cake_images = glob.glob(f'vggsfm_code/examples/cake/images/*')
+# british_museum_images = glob.glob(f'vggsfm_code/examples/british_museum/images/*')
+# face_images = glob.glob(f'vggsfm_code/examples/in2n_face/images/*')
+# counter_images = glob.glob(f'vggsfm_code/examples/in2n_counter/images/*')
+
+# horns_images = glob.glob(f'vggsfm_code/examples/llff_horns/images/*')
+
+# person_images = glob.glob(f'vggsfm_code/examples/in2n_person/images/*')
+# flower_images = glob.glob(f'vggsfm_code/examples/llff_flower/images/*')
+
+# fern_images = glob.glob(f'vggsfm_code/examples/llff_fern/images/*')
+# statue_images = glob.glob(f'vggsfm_code/examples/statue/images/*')
+
+# drums_images = glob.glob(f'vggsfm_code/examples/drums/images/*')
+# kitchen_images = glob.glob(f'vggsfm_code/examples/kitchen/images/*')
 
 
 
@@ -254,7 +293,7 @@ with gr.Blocks() as demo:
                 inputs=[input_video, input_images, num_query_images, num_query_points],
                 outputs=[reconstruction_output, log_output],  # Provide outputs
                 fn=vggsfm_demo,  # Provide the function
-                cache_examples=True,
+                cache_examples=False,
                 examples_per_page=50,
                 )
 

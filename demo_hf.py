@@ -7,7 +7,7 @@ from PIL import Image
 from torchvision import transforms as TF
 import glob
 from vggt.utils.pose_enc import pose_encoding_to_extri_intri 
-from viser_fn import viser_wrapper
+# from viser_fn import viser_wrapper
 
 
 @hydra.main(config_path="config", config_name="base")
@@ -20,10 +20,12 @@ def demo_fn(cfg: DictConfig) -> None:
     
     device = "cuda"
     model = model.to(device)
-    
+
     # _VGGSFM_URL = "https://huggingface.co/facebook/VGGSfM/resolve/main/vggsfm_v2_0_0.bin"
     # checkpoint = torch.hub.load_state_dict_from_url(_VGGSFM_URL)
 
+
+    # TODO: set custom path
     pretrain_model = torch.load("/fsx-repligen/jianyuan/cvpr2025_ckpts/r518_t7_cmh_v7_0-d4w770q.pt")
     model_dict = pretrain_model["model"]
     model.load_state_dict(model_dict, strict=False)
