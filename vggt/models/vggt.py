@@ -85,9 +85,9 @@ class VGGT(nn.Module):
         self.enable_head_mp = enable_head_mp
         # self.mask_patch_ratio = mask_patch_ratio
         # self.mask_patch_size = mask_patch_size
-        
-        
-    def forward(self, batch, device=None):
+
+
+    def forward(self, batch, device=None, aggregator_only=False):
         images = (batch["images"]) #.to(device) # B x S x 3 x H x W
         # intrinsics = (batch["intrinsics"])#.to(device)
         # extrinsics = (batch["extrinsics"])#.to(device)
@@ -103,13 +103,17 @@ class VGGT(nn.Module):
         aggregated_tokens_list, _, patch_start_idx = self.aggregator(images, batch=batch)
 
 
+        if aggregator_only:
+            return aggregated_tokens_list
+
+        torch.cuda.empty_cache()
         # Pose branch
         # TODO check pose encoding conversion  # Removed TODO
         # loss = 0
-        
+
 
         predictions = {}
-        
+
 
 
         # well by default we use amp for track head
@@ -130,7 +134,7 @@ class VGGT(nn.Module):
                 #     else:
                 #         camera_loss_dict = pred_pose_enc_list
                 predictions.update(camera_loss_dict)
-            
+
             if self.point_head is not None:
                 pts3d, pts3d_conf = self.point_head(aggregated_tokens_list, batch=batch, patch_start_idx=patch_start_idx)
                 # with torch.cuda.amp.autocast(enabled=False):
@@ -150,7 +154,7 @@ class VGGT(nn.Module):
             if self.match_head is not None:
                 match_loss_dict = self.match_head(aggregated_tokens_list, batch=batch, patch_start_idx=patch_start_idx)
                 predictions.update(match_loss_dict)
-                
+
         predictions.update(batch)
 
         return predictions

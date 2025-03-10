@@ -68,24 +68,22 @@ PointHead:
     camera_centric_reg: -1.0
     all_mean: True
 
-
-DepthHead:
-  _target_: vggt.heads.dpt_head.DPTHead
-  # _target_: off3d.models.vggt.linear_head.LinearHead
-  dim_in: 2048
-  patch_size: ${patch_size}
-  output_dim: 2
-  normalize_act: "exp"  # or just relu?
-  normalize_act_conf: "expp1"
-  pos_embed: True
-  loss_kwargs: 
-    loss_type: "conf"
-    predict_disparity: False  # or True
-    gradient_loss: "grad"
-    valid_range: 0.98
-    gamma: 1.0
-    all_mean: True
-
+DepthHead: null
+  # _target_: vggt.heads.dpt_head.DPTHead #off3d.models.vggt.dpt_head.DPTHead
+  # # _target_: off3d.models.vggt.linear_head.LinearHead
+  # dim_in: 2048
+  # patch_size: ${patch_size}
+  # output_dim: 2
+  # normalize_act: "exp"  # or just relu?
+  # normalize_act_conf: "expp1"
+  # pos_embed: True
+  # loss_kwargs: 
+  #   loss_type: "conf"
+  #   predict_disparity: False  # or True
+  #   gradient_loss: "grad"
+  #   valid_range: 0.98
+  #   gamma: 1.0
+  #   all_mean: True
 
 MatchHead: null
 TrackHead: null

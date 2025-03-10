@@ -1,0 +1,16 @@
+examples/kitchen filter=lfs diff=lfs merge=lfs -text
+examples/llff_horns filter=lfs diff=lfs merge=lfs -text
+examples/single filter=lfs diff=lfs merge=lfs -text
+examples/single_cartoon filter=lfs diff=lfs merge=lfs -text
+examples/videos filter=lfs diff=lfs merge=lfs -text
+examples/drums filter=lfs diff=lfs merge=lfs -text
+examples/llff_flower filter=lfs diff=lfs merge=lfs -text
+examples/room filter=lfs diff=lfs merge=lfs -text
+examples/cake filter=lfs diff=lfs merge=lfs -text
+examples/in2n_counter filter=lfs diff=lfs merge=lfs -text
+examples/in2n_face filter=lfs diff=lfs merge=lfs -text
+examples/in2n_person filter=lfs diff=lfs merge=lfs -text
+examples/apple filter=lfs diff=lfs merge=lfs -text
+examples/bonsai filter=lfs diff=lfs merge=lfs -text
+examples/llff_fern filter=lfs diff=lfs merge=lfs -text
+examples/single_oil_painting filter=lfs diff=lfs merge=lfs -text

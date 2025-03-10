@@ -1,34 +1,41 @@
 import hydra
 import torch
 import os
+import numpy as np
 from hydra.utils import instantiate
 from omegaconf import DictConfig
 from PIL import Image
 from torchvision import transforms as TF
 import glob
 from vggt.utils.pose_enc import pose_encoding_to_extri_intri 
-# from viser_fn import viser_wrapper
+from viser_fn import viser_wrapper
+from vggt.utils.geometry import depth_to_world_coords_points
 
-
-@hydra.main(config_path="config", config_name="base")
-def demo_fn(cfg: DictConfig) -> None:
-    print(cfg)
-    model = instantiate(cfg, _recursive_=False)
+# @hydra.main(config_path="config", config_name="base")
+def demo_fn(cfg: DictConfig, model) -> None:
+    print(cfg.SCENE_DIR)
     
     if not torch.cuda.is_available(): 
         raise ValueError("CUDA is not available. Check your environment.")
     
-    device = "cuda"
+    if torch.cuda.is_available():
+        device = "cuda"
+    else:
+        device = "cpu"
+    
     model = model.to(device)
 
-    # _VGGSFM_URL = "https://huggingface.co/facebook/VGGSfM/resolve/main/vggsfm_v2_0_0.bin"
-    # checkpoint = torch.hub.load_state_dict_from_url(_VGGSFM_URL)
+    # _VGGT_URL = "https://huggingface.co/facebook/vggt_alpha/resolve/main/vggt_alpha_v0.pt"
 
+    # # Reload model
+    # pretrain_model = torch.hub.load_state_dict_from_url(_VGGT_URL)
 
-    # TODO: set custom path
-    pretrain_model = torch.load("/fsx-repligen/jianyuan/cvpr2025_ckpts/r518_t7_cmh_v7_0-d4w770q.pt")
-    model_dict = pretrain_model["model"]
-    model.load_state_dict(model_dict, strict=False)
+    # if "model" in pretrain_model:
+    #     model_dict = pretrain_model["model"]
+    #     model.load_state_dict(model_dict, strict=False)
+    # else:
+    #     model.load_state_dict(pretrain_model, strict=True)
+
 
     # batch = torch.load("/fsx-repligen/jianyuan/cvpr2025_ckpts/batch.pth")
     # y_hat_raw = torch.load("/fsx-repligen/jianyuan/cvpr2025_ckpts/y_hat.pth")
@@ -50,17 +57,44 @@ def demo_fn(cfg: DictConfig) -> None:
     last_pred_pose_enc = y_hat["pred_extrinsic_list"][-1]
     pose_encoding_type = cfg.CameraHead.pose_encoding_type
     
-    last_pred_extrinsic, _ = pose_encoding_to_extri_intri(last_pred_pose_enc.detach(), None, pose_encoding_type=pose_encoding_type, build_intrinsics=False)
+    image_size_hw = batch['images'].shape[-2:]
+    
+    last_pred_extrinsic, last_pred_intrinsic = pose_encoding_to_extri_intri(last_pred_pose_enc.detach(), image_size_hw, pose_encoding_type=pose_encoding_type, build_intrinsics=True)
+
 
     y_hat["last_pred_extrinsic"] = last_pred_extrinsic
+    y_hat["last_pred_intrinsic"] = last_pred_intrinsic
 
-    # viser_wrapper(y_hat)
+    for key in y_hat.keys():
+        if isinstance(y_hat[key], torch.Tensor):
+            y_hat[key] = y_hat[key].cpu().numpy()
 
+
+    # 
+    pred_depth_numpy = y_hat["pred_depth"][0,...,0]
+    extrinsic_numpy = last_pred_extrinsic.cpu().numpy()[0]
+    intrinsic_numpy = last_pred_intrinsic.cpu().numpy()[0]
+    
+    world_points_by_depth_and_cam_list = []
+    
+    for bs in range(pred_depth_numpy.shape[0]):
+        cur_world_points, _, _ = depth_to_world_coords_points(pred_depth_numpy[bs], extrinsic_numpy[bs], intrinsic_numpy[bs])
+        world_points_by_depth_and_cam_list.append(cur_world_points)
+        
+    world_points_by_depth_and_cam = np.stack(world_points_by_depth_and_cam_list)
+    
+    y_hat["pred_world_points_by_depth_and_cam"] = world_points_by_depth_and_cam
+    
+    torch.cuda.empty_cache()
     return y_hat
 
 
 
 def load_and_preprocess_images(image_path_list):
+    # Check for empty list
+    if len(image_path_list) == 0:
+        raise ValueError("At least 1 image is required")
+
     # 1. load images as RGB 
     # 2. resize images to (518, X, 3), where X is the resized width and X should be divisible by 14
     # 3. normalize images to (0, 1)
@@ -120,15 +154,20 @@ def load_and_preprocess_images(image_path_list):
             padded_images.append(img)
         images = padded_images
 
+
     images = torch.stack(images)  # concatenate images
+    
+    # Ensure correct shape when single image
+    if len(image_path_list) == 1:
+        # Verify shape is (1, C, H, W)
+        if images.dim() == 3:
+            images = images.unsqueeze(0)
+    
     return images
 
 
-if __name__ == "__main__":
-    y_hat = demo_fn()
-    # viser_wrapper(y_hat)
-    
-    
-    
+# if __name__ == "__main__":
+#     y_hat = demo_fn()
+#     # viser_wrapper(y_hat, port=8080)
     
     

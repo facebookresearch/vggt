@@ -19,19 +19,22 @@ import os
 from scipy.spatial.transform import Rotation as R
 # from camera import closed_form_inverse_se3
 import torch
-
-
-# pip install viser==0.2.17
-
-# python viser_visualize_eval.py --dict_dir=/checkpoint/repligen/outputs/r518_t5_visual_0-v3fc505g/visual/ --step=0
-
+import threading
 
 def viser_wrapper(
     pred_dict: dict,
+    port: int = None,
+    init_conf_threshold: float = 3.0,
 ) -> None:
     """Visualize
+    Args:
+        pred_dict: Dictionary containing predictions
+        port: Optional port number for the viser server. If None, a random port will be used.
     """
-    server = viser.ViserServer()
+    print(f"Starting viser server on port {port}")  # Debug print
+    
+    server = viser.ViserServer(host="0.0.0.0", port=port)
+    # server = viser.ViserServer(port=port)
     server.gui.configure_theme(titlebar_content=None, control_layout="collapsible")
 
     # Unpack and preprocess inputs
@@ -47,12 +50,7 @@ def viser_wrapper(
         conf = conf[0]
         extrinsics = extrinsics[0]
 
-    # Convert tensors to numpy arrays
-    images = images.cpu().numpy()
     colors = images.transpose(0, 2, 3, 1)  # Convert to (B, H, W, C)
-    world_points = world_points.cpu().numpy()
-    extrinsics = extrinsics.cpu().numpy()
-    conf = conf.cpu().numpy()
 
     # Reshape for visualization
     S, H, W, _ = world_points.shape
@@ -71,78 +69,49 @@ def viser_wrapper(
 
     # set points3d as world_points
     points = world_points
-
-    ############################################################
-    ############################################################
-
-
-    gui_reset_up = server.gui.add_button(
-        "Reset up direction",
-        hint="Set the camera control 'up' direction to the current camera's 'up'.",
-    )
-
-
-    gui_set_camera = server.gui.add_button(
-        "Set Camera",
-        hint="Set the camera to the current camera's position.",
-    )
-
-
-
-    @gui_reset_up.on_click
-    def _(event: viser.GuiEvent) -> None:
-        client = event.client
-        assert client is not None
-        client.camera.up_direction = tf.SO3(client.camera.wxyz) @ np.array(
-            [0.0, -1.0, 0.0]
-        )
-
-
-    @gui_set_camera.on_click
-    def _(event: viser.GuiEvent) -> None:
-        client = event.client
-        assert client is not None
-        # client.camera.wxyz = np.array([1., 0., 0., 0.])
-        client.camera.position = np.array([0, 0, -1])
-        client.camera.look_at = (0, 0, 0)
-        print("set camera")
-        print(client.camera.position)
-        print(client.camera.wxyz)
-
-
-    gui_frames = server.gui.add_slider(
-        "Max frames",
-        min=0,
-        max=S,
-        step=1,
-        initial_value=min(S, 100),
-    )
     
+
+    # frame_mask 
+
+    frame_indices = np.arange(S)
+    frame_indices = frame_indices[:, None, None]  # Shape: (S, 1, 1, 1)
+    frame_indices = np.tile(frame_indices, (1, H, W))  # Shape: (S, H, W, 3)
+    frame_indices = frame_indices.reshape(-1)
+
+    ############################################################
+    ############################################################
+
+
 
     gui_points_conf = server.gui.add_slider(
-        "Max points conf",
+        "Confidence Thres",
         min=0.1,
-        max=30,
+        max=20,
         step=0.05,
-        initial_value=3,
+        initial_value=init_conf_threshold,
     )
     
-
 
 
     gui_point_size = server.gui.add_slider(
-        "Point size", min=0.00001, max=1.0, step=0.0001, initial_value=0.00001
+        "Point size", min=0.00001, max=0.01, step=0.0001, initial_value=0.00001
     )
 
+    # Change from "Frame Selector" to more descriptive name
+    gui_frame_selector = server.gui.add_dropdown(
+        "Filter by Frame",  # More action-oriented name
+        options=["All"] + [str(i) for i in range(S)],
+        initial_value="All",
+    )
 
-    init_conf_mask = conf > 3
-
-    # point_mask = np.random.choice(points.shape[0], gui_points.value, replace=False)
+    # Initial mask shows all points passing confidence threshold
+    init_conf_mask = conf > init_conf_threshold
     point_cloud = server.scene.add_point_cloud(
         name="viser_pcd",
         points=points[init_conf_mask],
         colors=colors[init_conf_mask],
         point_size=gui_point_size.value,
+        point_shape="circle",
     )
 
 
@@ -168,76 +137,100 @@ def viser_wrapper(
                     client.camera.wxyz = frame.wxyz
                     client.camera.position = frame.position
 
-        if gui_frames.value >0:
-            img_ids = sorted(range(S))[: gui_frames.value]
-            for img_id in tqdm(img_ids):
+        img_ids = sorted(range(S))
+        for img_id in tqdm(img_ids):
 
-                cam_to_world = extrinsics[img_id]
+            cam_to_world = extrinsics[img_id]
 
-                T_world_camera = tf.SE3.from_matrix(cam_to_world)
+            T_world_camera = tf.SE3.from_matrix(cam_to_world)
 
+            ratio = 1
+            frame = server.scene.add_frame(
+                f"frame_{img_id}",
+                wxyz=T_world_camera.rotation().wxyz,
+                position=T_world_camera.translation(),
+                axes_length=0.05/ratio,
+                axes_radius=0.002/ratio,
+                origin_radius = 0.002/ratio
+            )
+            
+            
+            frames.append(frame)
 
-                ratio = 1
-                frame = server.scene.add_frame(
-                    f"viser_frame_{img_id}",
-                    wxyz=T_world_camera.rotation().wxyz,
-                    position=T_world_camera.translation(),
-                    axes_length=0.05/ratio,
-                    axes_radius=0.002/ratio,
-                    origin_radius = 0.002/ratio
-                )
-                frames.append(frame)
-
-                img = images[img_id]
-                img = (img.transpose(1, 2, 0) * 255).astype(np.uint8)
-                # import pdb;pdb.set_trace()
-                H, W = img.shape[:2]
-                # fy = intrinsics[img_id, 1, 1] * H
-                fy = 1.1 * H
-                image = img
-                # image = image[::downsample_factor, ::downsample_factor]
-                frustum = server.scene.add_camera_frustum(
-                    f"viser_frame_{img_id}/frustum",
-                    fov=2 * np.arctan2(H / 2, fy),
-                    aspect=W / H,
-                    scale=0.05/ratio,
-                    image=image,
-                    # line_thickness=0.01,
-                )
-                attach_callback(frustum, frame)
-        else:
-            print("No frames to visualize")
-
-
-
-    need_update = True
+            img = images[img_id]
+            img = (img.transpose(1, 2, 0) * 255).astype(np.uint8)
+            # import pdb;pdb.set_trace()
+            H, W = img.shape[:2]
+            # fy = intrinsics[img_id, 1, 1] * H
+            fy = 1.1 * H
+            image = img
+            # image = image[::downsample_factor, ::downsample_factor]
+            frustum = server.scene.add_camera_frustum(
+                f"frame_{img_id}/frustum",
+                fov=2 * np.arctan2(H / 2, fy),
+                aspect=W / H,
+                scale=0.05/ratio,
+                image=image,
+                line_width=1.0,
+                # line_thickness=0.01,
+            )
+            
+            attach_callback(frustum, frame)
 
 
     @gui_points_conf.on_update
     def _(_) -> None:
         conf_mask = conf > gui_points_conf.value
-        point_cloud.points = points[conf_mask]
-        point_cloud.colors = colors[conf_mask]
+        frame_mask = np.ones_like(conf_mask)  # Default to all frames
+        if gui_frame_selector.value != "All":
+            selected_idx = int(gui_frame_selector.value)
+            frame_mask = (frame_indices == selected_idx)
         
-
-    @gui_frames.on_update
-    def _(_) -> None:
-        nonlocal need_update
-        need_update = True
-
+        combined_mask = conf_mask & frame_mask
+        point_cloud.points = points[combined_mask]
+        point_cloud.colors = colors[combined_mask]
+        
     @gui_point_size.on_update
     def _(_) -> None:
         point_cloud.point_size = gui_point_size.value
 
+    @gui_frame_selector.on_update
+    def _(_) -> None:
+        """Update points based on frame selection."""
+        conf_mask = conf > gui_points_conf.value
+        
+        if gui_frame_selector.value == "All":
+            # Show all points passing confidence threshold
+            point_cloud.points = points[conf_mask]
+            point_cloud.colors = colors[conf_mask]
+        else:
+            # Show only selected frame's points
+            selected_idx = int(gui_frame_selector.value)
+            frame_mask = (frame_indices == selected_idx)
+            combined_mask = conf_mask & frame_mask
+            point_cloud.points = points[combined_mask]
+            point_cloud.colors = colors[combined_mask]
 
-    while True:
-        if need_update:
-            need_update = False
-            visualize_frames(extrinsics, None, images)
+            # Move camera to selected frame
+            # if 0 <= selected_idx < len(frames):
+            #     selected_frame = frames[selected_idx]
+            #     for client in server.get_clients().values():
+            #         client.camera.wxyz = selected_frame.wxyz
+            #         client.camera.position = selected_frame.position
 
 
-        time.sleep(1e-3)
+    # Initial visualization
+    visualize_frames(extrinsics, None, images)
+        
+    # # Start server update loop in a background thread
+    def server_loop():
+        while True:
+            time.sleep(1e-3)  # Small sleep to prevent CPU hogging
 
+    thread = threading.Thread(target=server_loop, daemon=True)
+    thread.start()
+    
+    
 
 def closed_form_inverse_se3(se3, R=None, T=None):
     """
