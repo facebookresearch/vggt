@@ -51,11 +51,11 @@ def demo_fn(cfg: DictConfig, model) -> None:
     
     with torch.no_grad():
         with torch.cuda.amp.autocast(dtype=torch.float16): 
-            y_hat = model(batch)
-
+            # y_hat = model(batch)
+            y_hat = model(images)
 
     last_pred_pose_enc = y_hat["pred_extrinsic_list"][-1]
-    pose_encoding_type = cfg.CameraHead.pose_encoding_type
+    pose_encoding_type = "absT_quaR_FoV"
     
     image_size_hw = batch['images'].shape[-2:]
     

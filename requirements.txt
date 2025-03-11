@@ -1,29 +1,7 @@
-torch==2.4.0
-torchvision==0.19.0
-hydra-core==1.3.2
-scipy
-omegaconf 
-opencv-python 
-einops 
-numpy==1.26.3
-viser
-trimesh
-matplotlib
-onnxruntime
+torch==2.3.1
+torchvision==0.18.1
+numpy==1.26.1
+Pillow
 
 
-# accelerate==0.24.0
-# git+https://github.com/cvg/LightGlue.git#egg=LightGlue
-# pycolmap==0.6.1
-# https://huggingface.co/facebook/VGGSfM/resolve/main/poselib-2.0.2-cp310-cp310-linux_x86_64.whl
-# trimesh
-# open3d
 
-# hydra-core==1.3.2
-# scipy
-# omegaconf 
-# opencv-python 
-# einops 
-# numpy==1.26.3
-# trimesh
-# open3d

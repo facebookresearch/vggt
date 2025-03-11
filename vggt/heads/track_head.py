@@ -11,7 +11,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from .head_act import activate_head
-from .utils import normalized_view_plane_uv, HarmonicEmbedding, position_grid_to_embed
+from .utils import normalized_view_plane_uv, position_grid_to_embed
 from .dpt_head import DPTHead
 from .match_head import MatchHead
 from ..track_modules.base_track_predictor import BaseTrackerPredictor
@@ -138,6 +138,10 @@ class TrackHead(nn.Module):
                  **kwargs):
         super().__init__()
         
+        
+        raise NotImplementedError("Track head is not implemented")
+    
+    
         self.patch_size = patch_size
         self.feature_extractor_type = feature_extractor_type
         self.train_query_points = train_query_points

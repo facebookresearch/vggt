@@ -1,160 +1,196 @@
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+#
+# This source code is licensed under the Apache License, Version 2.0
+# found in the LICENSE file in the root directory of this source tree.
+
+
+
+# Implementation of 2D Rotary Position Embeddings (RoPE).
+
+# This module provides a clean implementation of 2D Rotary Position Embeddings,
+# which extends the original RoPE concept to handle 2D spatial positions.
+
+# Inspired by: 
+#         https://github.com/meta-llama/codellama/blob/main/llama/model.py
+#         https://github.com/naver-ai/rope-vit
+
+
 import numpy as np
 import torch
+import torch.nn as nn
+import torch.nn.functional as F
+from typing import Dict, Tuple
 
 
-class PositionGetter(object):
-    """ return positions of patches """
-
-    # NOTE this can take a lot of memory when the patch size is variable
+class PositionGetter:
+    """Generates and caches 2D spatial positions for patches in a grid.
+    
+    This class efficiently manages the generation of spatial coordinates for patches
+    in a 2D grid, caching results to avoid redundant computations.
+    
+    Attributes:
+        position_cache: Dictionary storing precomputed position tensors for different
+            grid dimensions.
+    """
     
     def __init__(self):
-        self.cache_positions = {}
+        """Initializes the position generator with an empty cache."""
+        self.position_cache: Dict[Tuple[int, int], torch.Tensor] = {}
         
-    def __call__(self, b, h, w, device):
-        if not (h,w) in self.cache_positions:
-            x = torch.arange(w, device=device)
-            y = torch.arange(h, device=device)
-            self.cache_positions[h,w] = torch.cartesian_prod(y, x) # (h, w, 2)
-        pos = self.cache_positions[h,w].view(1, h*w, 2).expand(b, -1, 2).clone()
-        return pos
+    def __call__(self, batch_size: int, height: int, width: int, 
+                 device: torch.device) -> torch.Tensor:
+        """Generates spatial positions for a batch of patches.
+        
+        Args:
+            batch_size: Number of samples in the batch.
+            height: Height of the grid in patches.
+            width: Width of the grid in patches.
+            device: Target device for the position tensor.
+            
+        Returns:
+            Tensor of shape (batch_size, height*width, 2) containing y,x coordinates
+            for each position in the grid, repeated for each batch item.
+        """
+        if (height, width) not in self.position_cache:
+            y_coords = torch.arange(height, device=device)
+            x_coords = torch.arange(width, device=device)
+            positions = torch.cartesian_prod(y_coords, x_coords)
+            self.position_cache[height, width] = positions
+            
+        cached_positions = self.position_cache[height, width]
+        return cached_positions.view(1, height * width, 2).expand(batch_size, -1, -1).clone()
 
 
-# --------------------------------------------------------
-# 2D sine-cosine position embedding
-# References:
-# MAE: https://github.com/facebookresearch/mae/blob/main/util/pos_embed.py
-# Transformer: https://github.com/tensorflow/models/blob/master/official/nlp/transformer/model_utils.py
-# MoCo v3: https://github.com/facebookresearch/moco-v3
-# --------------------------------------------------------
-def get_2d_sincos_pos_embed(embed_dim, grid_size, n_cls_token=0):
+class RotaryPositionEmbedding2D(nn.Module):
+    """2D Rotary Position Embedding implementation.
+    
+    This module applies rotary position embeddings to input tokens based on their
+    2D spatial positions. It handles the position-dependent rotation of features
+    separately for vertical and horizontal dimensions.
+    
+    Args:
+        frequency: Base frequency for the position embeddings. Default: 100.0
+        scaling_factor: Scaling factor for frequency computation. Default: 1.0
+        
+    Attributes:
+        base_frequency: Base frequency for computing position embeddings.
+        scaling_factor: Factor to scale the computed frequencies.
+        frequency_cache: Cache for storing precomputed frequency components.
     """
-    grid_size: tuple (height, width) of the grid
-    return:
-    pos_embed: [grid_size[0]*grid_size[1], embed_dim] or [n_cls_token+grid_size[0]*grid_size[1], embed_dim] (w/ or w/o cls_token)
-    """
-    grid_h = np.arange(grid_size[0], dtype=np.float32)
-    grid_w = np.arange(grid_size[1], dtype=np.float32)
-    grid = np.meshgrid(grid_w, grid_h)  # here w goes first
-    grid = np.stack(grid, axis=0)
-
-    grid = grid.reshape([2, 1, grid_size[0], grid_size[1]])
-    pos_embed = get_2d_sincos_pos_embed_from_grid(embed_dim, grid)
-    if n_cls_token>0:
-        pos_embed = np.concatenate([np.zeros([n_cls_token, embed_dim]), pos_embed], axis=0)
-    return pos_embed
-
-
-def get_2d_sincos_pos_embed_from_grid(embed_dim, grid):
-    assert embed_dim % 2 == 0
-
-    # use half of dimensions to encode grid_h
-    emb_h = get_1d_sincos_pos_embed_from_grid(embed_dim // 2, grid[0])  # (H*W, D/2)
-    emb_w = get_1d_sincos_pos_embed_from_grid(embed_dim // 2, grid[1])  # (H*W, D/2)
-
-    emb = np.concatenate([emb_h, emb_w], axis=1) # (H*W, D)
-    return emb
-
-
-def get_1d_sincos_pos_embed_from_grid(embed_dim, pos):
-    """
-    embed_dim: output dimension for each position
-    pos: a list of positions to be encoded: size (M,)
-    out: (M, D)
-    """
-    assert embed_dim % 2 == 0
-    omega = np.arange(embed_dim // 2, dtype=float)
-    omega /= embed_dim / 2.
-    omega = 1. / 10000**omega  # (D/2,)
-
-    pos = pos.reshape(-1)  # (M,)
-    out = np.einsum('m,d->md', pos, omega)  # (M, D/2), outer product
-
-    emb_sin = np.sin(out) # (M, D/2)
-    emb_cos = np.cos(out) # (M, D/2)
-
-    emb = np.concatenate([emb_sin, emb_cos], axis=1)  # (M, D)
-    return emb
-
-
-# --------------------------------------------------------
-# Interpolate position embeddings for high-resolution
-# References:
-# MAE: https://github.com/facebookresearch/mae/blob/main/util/pos_embed.py
-# DeiT: https://github.com/facebookresearch/deit
-# --------------------------------------------------------
-def interpolate_pos_embed(model, checkpoint_model):
-    keys = ['enc_pos_embed']+(['dec_pos_embed'] if hasattr(model,'dec_blocks') else [])
-    img_size = model.patch_embed.img_size
-    if isinstance(img_size,int): img_size = (img_size,img_size)
-    for k in keys:
-        if not k in checkpoint_model: continue
-        pos_embed_checkpoint = checkpoint_model[k]
-        embedding_size = pos_embed_checkpoint.shape[-1]
-        num_extra_tokens = 0 # no cls token
-        # height (== width) for the checkpoint position embedding
-        orig_size = int((pos_embed_checkpoint.shape[-2] - num_extra_tokens) ** 0.5)
-        new_size = (img_size[0]//model.patch_embed.patch_size[0],img_size[1]//model.patch_embed.patch_size[1])
-        if orig_size != new_size[0] or orig_size != new_size[1]:
-            print("Position interpolate %s from %dx%d to %dx%d" % (k, orig_size, orig_size, new_size[0], new_size[1]))
-            extra_tokens = pos_embed_checkpoint[:num_extra_tokens,:]
-            pos_tokens = pos_embed_checkpoint[num_extra_tokens:,:]
-            pos_tokens = pos_tokens.reshape(1, orig_size, orig_size, embedding_size).permute(0, 3, 1, 2)
-            pos_tokens = torch.nn.functional.interpolate(pos_tokens, size=(new_size[0], new_size[1]), mode='bicubic', align_corners=False)
-            pos_tokens = pos_tokens.permute(0, 2, 3, 1).flatten(1, 2).squeeze(0)
-            new_pos_embed = torch.cat((extra_tokens, pos_tokens), dim=0)
-            checkpoint_model[k] = new_pos_embed.squeeze(0)
-
-#----------------------------------------------------------
-# RoPE2D: RoPE implementation in 2D
-#----------------------------------------------------------
-
-# borrowed from https://github.com/naver/dust3r
-# todo: replace with our official implementation
-
-class RoPE2D(torch.nn.Module):
-    def __init__(self, freq=100.0, F0=1.0):
+    
+    def __init__(self, frequency: float = 100.0, scaling_factor: float = 1.0):
+        """Initializes the 2D RoPE module."""
         super().__init__()
-        self.base = freq 
-        self.F0 = F0
-        self.cache = {}
-
-    def get_cos_sin(self, D, seq_len, device, dtype):
-        if (D,seq_len,device,dtype) not in self.cache:
-            inv_freq = 1.0 / (self.base ** (torch.arange(0, D, 2).float().to(device) / D))
-            t = torch.arange(seq_len, device=device, dtype=inv_freq.dtype)
-            freqs = torch.einsum("i,j->ij", t, inv_freq).to(dtype)
-            freqs = torch.cat((freqs, freqs), dim=-1)
-            cos = freqs.cos() # (Seq, Dim)
-            sin = freqs.sin()
-            self.cache[D,seq_len,device,dtype] = (cos,sin)
-        return self.cache[D,seq_len,device,dtype]
+        self.base_frequency = frequency
+        self.scaling_factor = scaling_factor
+        self.frequency_cache: Dict[Tuple, Tuple[torch.Tensor, torch.Tensor]] = {}
         
+    def _compute_frequency_components(
+        self, dim: int, seq_len: int, device: torch.device, dtype: torch.dtype
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
+        """Computes frequency components for rotary embeddings.
+        
+        Args:
+            dim: Feature dimension (must be even).
+            seq_len: Maximum sequence length.
+            device: Target device for computations.
+            dtype: Data type for the computed tensors.
+            
+        Returns:
+            Tuple of (cosine, sine) tensors for frequency components.
+        """
+        cache_key = (dim, seq_len, device, dtype)
+        if cache_key not in self.frequency_cache:
+            # Compute frequency bands
+            exponents = torch.arange(0, dim, 2, device=device).float() / dim
+            inv_freq = 1.0 / (self.base_frequency ** exponents)
+            
+            # Generate position-dependent frequencies
+            positions = torch.arange(seq_len, device=device, dtype=inv_freq.dtype)
+            angles = torch.einsum('i,j->ij', positions, inv_freq)
+            
+            # Compute and cache frequency components
+            angles = angles.to(dtype)
+            angles = torch.cat((angles, angles), dim=-1)
+            cos_components = angles.cos().to(dtype)
+            sin_components = angles.sin().to(dtype)
+            self.frequency_cache[cache_key] = (cos_components, sin_components)
+            
+        return self.frequency_cache[cache_key]
+    
     @staticmethod
-    def rotate_half(x):
-        x1, x2 = x[..., : x.shape[-1] // 2], x[..., x.shape[-1] // 2 :]
+    def _rotate_features(x: torch.Tensor) -> torch.Tensor:
+        """Performs feature rotation by splitting and recombining feature dimensions.
+        
+        Args:
+            x: Input tensor to rotate.
+            
+        Returns:
+            Rotated feature tensor.
+        """
+        feature_dim = x.shape[-1]
+        x1, x2 = x[..., :feature_dim//2], x[..., feature_dim//2:]
         return torch.cat((-x2, x1), dim=-1)
+    
+    def _apply_1d_rope(
+        self, tokens: torch.Tensor, positions: torch.Tensor,
+        cos_comp: torch.Tensor, sin_comp: torch.Tensor
+    ) -> torch.Tensor:
+        """Applies 1D rotary position embeddings along one dimension.
         
-    def apply_rope1d(self, tokens, pos1d, cos, sin):
-        assert pos1d.ndim==2
-        cos = torch.nn.functional.embedding(pos1d, cos)[:, None, :, :]
-        sin = torch.nn.functional.embedding(pos1d, sin)[:, None, :, :]
-        return (tokens * cos) + (self.rotate_half(tokens) * sin)
+        Args:
+            tokens: Input token features.
+            positions: Position indices.
+            cos_comp: Cosine components for rotation.
+            sin_comp: Sine components for rotation.
+            
+        Returns:
+            Tokens with applied rotary position embeddings.
+        """
+        # Embed positions with frequency components
+        cos = F.embedding(positions, cos_comp)[:, None, :, :]
+        sin = F.embedding(positions, sin_comp)[:, None, :, :]
         
-    def forward(self, tokens, positions):
+        # Apply rotation
+        return (tokens * cos) + (self._rotate_features(tokens) * sin)
+    
+    def forward(self, tokens: torch.Tensor, positions: torch.Tensor) -> torch.Tensor:
+        """Applies 2D rotary position embeddings to input tokens.
+        
+        Args:
+            tokens: Input tensor of shape (batch_size, n_heads, n_tokens, dim).
+                   The feature dimension (dim) must be divisible by 4.
+            positions: Position tensor of shape (batch_size, n_tokens, 2) containing
+                      the y and x coordinates for each token.
+                      
+        Returns:
+            Tensor of same shape as input with applied 2D rotary position embeddings.
+            
+        Raises:
+            AssertionError: If input dimensions are invalid or positions are malformed.
         """
-        input:
-            * tokens: batch_size x nheads x ntokens x dim
-            * positions: batch_size x ntokens x 2 (y and x position of each token)
-        output:
-            * tokens after appplying RoPE2D (batch_size x nheads x ntokens x dim)
-        """
-        assert tokens.size(3)%2==0, "number of dimensions should be a multiple of two"
-        D = tokens.size(3) // 2
-        assert positions.ndim==3 and positions.shape[-1] == 2 # Batch, Seq, 2
-        cos, sin = self.get_cos_sin(D, int(positions.max())+1, tokens.device, tokens.dtype)
-        # split features into two along the feature dimension, and apply rope1d on each half
-        y, x = tokens.chunk(2, dim=-1)
-        y = self.apply_rope1d(y, positions[:,:,0], cos, sin)
-        x = self.apply_rope1d(x, positions[:,:,1], cos, sin)
-        tokens = torch.cat((y, x), dim=-1)
-        return tokens
+        # Validate inputs
+        assert tokens.size(-1) % 2 == 0, "Feature dimension must be even"
+        assert positions.ndim == 3 and positions.shape[-1] == 2, \
+            "Positions must have shape (batch_size, n_tokens, 2)"
+        
+        # Compute feature dimension for each spatial direction
+        feature_dim = tokens.size(-1) // 2
+        
+        # Get frequency components
+        max_position = int(positions.max()) + 1
+        cos_comp, sin_comp = self._compute_frequency_components(
+            feature_dim, max_position, tokens.device, tokens.dtype)
+        
+        # Split features for vertical and horizontal processing
+        vertical_features, horizontal_features = tokens.chunk(2, dim=-1)
+        
+        # Apply RoPE separately for each dimension
+        vertical_features = self._apply_1d_rope(
+            vertical_features, positions[..., 0], cos_comp, sin_comp)
+        horizontal_features = self._apply_1d_rope(
+            horizontal_features, positions[..., 1], cos_comp, sin_comp)
+        
+        # Combine processed features
+        return torch.cat((vertical_features, horizontal_features), dim=-1)
+

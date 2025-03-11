@@ -1,9 +1,8 @@
-# Modified from PyTorch3D
+# Modified from PyTorch3D, https://github.com/facebookresearch/pytorch3d
 
 import torch
 import numpy as np
 import torch.nn.functional as F
-from scipy.spatial.transform import Rotation as R
 
 
 
@@ -135,66 +134,3 @@ def standardize_quaternion(quaternions: torch.Tensor) -> torch.Tensor:
         Standardized quaternions as tensor of shape (..., 4).
     """
     return torch.where(quaternions[..., 3:4] < 0, -quaternions, quaternions)
-
-
-def quat_to_mat_scipy(quaternions: np.ndarray) -> np.ndarray:
-    rotation = R.from_quat(quaternions)
-    return rotation.as_matrix()
-
-def mat_to_quat_scipy(matrix: np.ndarray) -> np.ndarray:
-    rotation = R.from_matrix(matrix)
-    return rotation.as_quat()
-
-
-if __name__ == "__main__":
-    
-    num_tests = 10000  # Number of tests to run
-    tolerance = 1e-6   # Tolerance for floating point comparison
-
-    for _ in range(num_tests):
-        # Generate random quaternions
-        quaternions = torch.randn(1024, 4)
-        quaternions = quaternions / torch.norm(quaternions, dim=-1, keepdim=True)  # Normalize to unit quaternions
-
-        # Convert quaternion to matrix using PyTorch
-        matrices_torch = quat_to_mat(quaternions)
-
-        # Convert matrices back to quaternions using PyTorch
-        quaternions_back = mat_to_quat(matrices_torch)
-
-        # Standardize quaternions to handle the case where quaternions = -quaternions_back
-        quaternions = standardize_quaternion(quaternions)
-        quaternions_back = standardize_quaternion(quaternions_back)
-
-        # Check if the original and converted quaternions match
-        if not torch.allclose(quaternions, quaternions_back, atol=tolerance):
-            print("Mismatch found!")
-            print("Original quaternions:", quaternions)
-            print("Converted quaternions:", quaternions_back)
-            max_error = torch.max(torch.abs(quaternions - quaternions_back))
-            print("Max error:", max_error)
-    else:
-        print("All tests passed successfully!")
-        
-    # write code here
-
-    # quaternions = torch.randn(1024, 4) * 20
-    # # quaternions = quaternions / torch.norm(quaternions, dim=-1, keepdim=True)  # Normalize to unit quaternions
-
-    # # Convert quaternion to matrix using PyTorch
-    # matrices_torch = quat_to_mat(quaternions).numpy()
-
-    # # Convert quaternion to matrix using SciPy
-    # matrices_scipy = quat_to_mat_scipy(quaternions.numpy())
-
-    # # Convert matrices back to quaternions using PyTorch
-    # quaternions_torch = mat_to_quat(torch.from_numpy(matrices_scipy)).numpy()
-
-    # # Convert matrices back to quaternions using SciPy
-    # quaternions_scipy = mat_to_quat_scipy(matrices_torch)
-
-
-    # reconvert_mat_diff = quat_to_mat_scipy(quaternions_torch) - quat_to_mat_scipy(quaternions_scipy)
-    # # Compare results
-    # print("Matrix conversion difference:", np.linalg.norm(matrices_torch - matrices_scipy))
-    # print("Quaternion conversion difference:", np.linalg.norm(reconvert_mat_diff))

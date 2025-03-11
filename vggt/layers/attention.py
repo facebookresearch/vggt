@@ -15,40 +15,21 @@ from torch import Tensor
 from torch import nn
 import torch.nn.functional as F
 
-
-logger = logging.getLogger("dinov2")
-
-
-# XFORMERS_ENABLED = os.environ.get("XFORMERS_DISABLED") is None
-# try:
-#     if XFORMERS_ENABLED:
-#         from xformers.ops import memory_efficient_attention, unbind
-
-#         XFORMERS_AVAILABLE = True
-#         warnings.warn("xFormers is available (Attention)")
-#     else:
-#         warnings.warn("xFormers is disabled (Attention)")
-#         raise ImportError
-# except ImportError:
-#     XFORMERS_AVAILABLE = False
-#     warnings.warn("xFormers is not available (Attention)")
-
 XFORMERS_AVAILABLE = False
-
 
 class Attention(nn.Module):
     def __init__(
-            self,
-            dim: int,
-            num_heads: int = 8,
-            qkv_bias: bool = True,
-            qk_norm: bool = False,
-            attn_drop: float = 0.,
-            proj_drop: float = 0.,
-            proj_bias: bool = True,
-            norm_layer: nn.Module = nn.LayerNorm,
-            fused_attn: bool = True,
-            rope = None,
+        self,
+        dim: int,
+        num_heads: int = 8,
+        qkv_bias: bool = True,
+        proj_bias: bool = True,
+        attn_drop: float = 0.0,
+        proj_drop: float = 0.0,
+        norm_layer: nn.Module = nn.LayerNorm,
+        qk_norm: bool = False,
+        fused_attn: bool = True,    # use F.scaled_dot_product_attention or not
+        rope = None,
     ) -> None:
         super().__init__()
         assert dim % num_heads == 0, 'dim should be divisible by num_heads'
@@ -91,7 +72,6 @@ class Attention(nn.Module):
         x = self.proj(x)
         x = self.proj_drop(x)
         return x
-
 
 
 

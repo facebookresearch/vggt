@@ -15,32 +15,13 @@ import warnings
 import torch
 from torch import nn, Tensor
 
-from .attention import Attention, MemEffAttention
+from .attention import Attention
 from .drop_path import DropPath
 from .layer_scale import LayerScale
 from .mlp import Mlp
 
 
-logger = logging.getLogger("dinov2")
-
-
-# XFORMERS_ENABLED = os.environ.get("XFORMERS_DISABLED") is None
-# try:
-#     if XFORMERS_ENABLED:
-#         from xformers.ops import fmha, scaled_index_add, index_select_cat
-
-#         XFORMERS_AVAILABLE = True
-#         warnings.warn("xFormers is available (Block)")
-#     else:
-#         warnings.warn("xFormers is disabled (Block)")
-#         raise ImportError
-# except ImportError:
-#     XFORMERS_AVAILABLE = False
-
-#     warnings.warn("xFormers is not available (Block)")
-
 XFORMERS_AVAILABLE = False
-
 class Block(nn.Module):
     def __init__(
         self,
@@ -48,10 +29,8 @@ class Block(nn.Module):
         num_heads: int,
         mlp_ratio: float = 4.0,
         qkv_bias: bool = True,
-        qk_norm: bool = False,
         proj_bias: bool = True,
         ffn_bias: bool = True,
-        fused_attn: bool = True,
         drop: float = 0.0,
         attn_drop: float = 0.0,
         init_values=None,
@@ -60,24 +39,27 @@ class Block(nn.Module):
         norm_layer: Callable[..., nn.Module] = nn.LayerNorm,
         attn_class: Callable[..., nn.Module] = Attention,
         ffn_layer: Callable[..., nn.Module] = Mlp,
-        rope_freq: int = -1,
+        qk_norm: bool = False,
+        fused_attn: bool = True,    # use F.scaled_dot_product_attention or not
         rope = None,
     ) -> None:
         super().__init__()
-        # print(f"biases: qkv: {qkv_bias}, proj: {proj_bias}, ffn: {ffn_bias}")
+
+
         self.norm1 = norm_layer(dim)
                 
         self.attn = attn_class(
             dim,
             num_heads=num_heads,
             qkv_bias=qkv_bias,
-            qk_norm=qk_norm,
             proj_bias=proj_bias,
             attn_drop=attn_drop,
             proj_drop=drop,
+            qk_norm=qk_norm,
             fused_attn=fused_attn,
             rope=rope,
         )
+        
         self.ls1 = LayerScale(dim, init_values=init_values) if init_values else nn.Identity()
         self.drop_path1 = DropPath(drop_path) if drop_path > 0.0 else nn.Identity()
 
@@ -138,6 +120,7 @@ def drop_add_residual_stochastic_depth(
 
     # 2) apply residual_func to get residual
     if pos is not None:
+        # if necessary, apply rope to the subset
         pos = pos[brange]
         residual = residual_func(x_subset, pos=pos)
     else:
@@ -273,3 +256,4 @@ class NestedTensorBlock(Block):
             return self.forward_nested(x_or_x_list)
         else:
             raise AssertionError
+

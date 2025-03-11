@@ -1,9 +1,6 @@
-
 import os
 import torch
 import numpy as np
-# from off3d.utils.general import check_and_fix_inf_nan
-# from off3d.utils.camera import closed_form_inverse_se3
 
 
 

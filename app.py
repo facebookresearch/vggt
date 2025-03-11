@@ -19,6 +19,7 @@ from viser_fn import viser_wrapper
 from gradio_util import demo_predictions_to_glb
 from hydra.utils import instantiate
 # import spaces
+from vggt.models.vggt import VGGT
 
 
 
@@ -26,17 +27,18 @@ print("Loading model")
 
 cfg_file = "config/base.yaml"
 cfg = OmegaConf.load(cfg_file)
-vggt_model = instantiate(cfg, _recursive_=False)
-
+# vggt_model = instantiate(cfg, _recursive_=False)
+vggt_model = VGGT()
 # Reload vggt_model
 # _VGGT_URL = "https://huggingface.co/facebook/vggt_alpha/resolve/main/vggt_alpha_v0.pt"
 # pretrain_model = torch.hub.load_state_dict_from_url(_VGGT_URL)
 
 
 if True:
-    _CKPT_PATH = "/fsx-repligen/jianyuan/cvpr2025_ckpts/r518_t7_cmh_v7_0-d4w770q_model.pt"
+    _CKPT_PATH = "/fsx-repligen/jianyuan/cvpr2025_ckpts/r518_t7_cmh_v7_0-d4w770q_model_converted.pt"
     pretrain_model = torch.load(_CKPT_PATH)
 
+    # import pdb; pdb.set_trace()
     if "model" in pretrain_model:
         model_dict = pretrain_model["model"]
         vggt_model.load_state_dict(model_dict, strict=False)
