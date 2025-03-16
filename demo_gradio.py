@@ -409,7 +409,7 @@ with gr.Blocks(
         </details>
         </li>
     </ol>
-    <p><strong style="color: #0ea5e9;">Please note:</strong> <span style="color: #0ea5e9; font-weight: bold;">Our model itself usually only needs less than 1 second to reconstruct a scene. However, visualizing the resulting 3D points may take tens of seconds due to third-party rendering and file format conversions, which are independent of VGGT's processing time.</span></p>
+    <p><strong style="color: #0ea5e9;">Please note:</strong> <span style="color: #0ea5e9; font-weight: bold;">Our model itself usually only needs less than 1 second to reconstruct a scene. However, visualizing the resulting 3D points may take tens of seconds due to third-party rendering, which are independent of VGGT's processing time.</span></p>
     </div>
     """
     )

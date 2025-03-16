@@ -122,7 +122,8 @@ pip install -r requirements_demo.txt
 
 ### Interactive 3D Visualization
 
-**Please note:** Our method usually only needs less than 1 second to reconstruct a scene, but the visualization of 3D points may take tens of seconds, especially when the number of images is large.
+**Please note:** VGGT typically reconstructs a scene in less than 1 second. However, visualizing 3D points may take tens of seconds due to third-party rendering, independent of VGGT's processing time. The visualization is slow especially when the number of images is large.
+
 
 #### Gradio Web Interface
 
