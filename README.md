@@ -122,6 +122,8 @@ pip install -r requirements_demo.txt
 
 ### Interactive 3D Visualization
 
+**Please note:** Our method usually only needs less than 1 second to reconstruct a scene, but the visualization of 3D points may take tens of seconds, especially when the number of images is large.
+
 #### Gradio Web Interface
 
 Our Gradio-based interface allows you to upload images/videos, run reconstruction, and interactively explore the 3D scene in your browser. You can launch this in your local machine or try it on [Hugging Face](https://huggingface.co/spaces/facebook/vggt).

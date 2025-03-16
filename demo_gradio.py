@@ -409,7 +409,7 @@ with gr.Blocks(
         </details>
         </li>
     </ol>
-    <p><strong>Please note:</strong> Our method usually only needs less than 1 second to reconstruct a scene, but the visualization of 3D points may take tens of seconds, especially when the number of images is large. Please be patient or, for faster visualization, use a local machine to run our demo from our <a href="https://github.com/facebookresearch/vggt">GitHub repository</a>.</p>
+    <p><strong style="color: #0ea5e9;">Please note:</strong> <span style="color: #0ea5e9; font-weight: bold;">Our method usually only needs less than 1 second to reconstruct a scene, but the visualization of 3D points may take tens of seconds</span>.</p>
     </div>
     """
     )
