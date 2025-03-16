@@ -311,7 +311,7 @@ def update_visualization(
 # Example images
 # -------------------------------------------------------------------------
 
-canyon_video = "examples/videos/Studlagil_Canyon_East_Iceland.mp4"
+# canyon_video = "examples/videos/Studlagil_Canyon_East_Iceland.mp4"
 great_wall_video = "examples/videos/great_wall.mp4"
 colosseum_video = "examples/videos/Colosseum.mp4"
 room_video = "examples/videos/room.mp4"
@@ -409,7 +409,7 @@ with gr.Blocks(
         </details>
         </li>
     </ol>
-    <p><strong style="color: #0ea5e9;">Please note:</strong> <span style="color: #0ea5e9; font-weight: bold;">Our model itself usually only needs less than 1 second to reconstruct a scene. However, visualizing the resulting 3D points may take tens of seconds due to third-party rendering, which are independent of VGGT's processing time.</span></p>
+    <p><strong style="color: #0ea5e9;">Please note:</strong> <span style="color: #0ea5e9; font-weight: bold;">VGGT typically reconstructs a scene in less than 1 second. However, visualizing 3D points may take tens of seconds due to third-party rendering, which are independent of VGGT's processing time. </span></p>
     </div>
     """
     )
@@ -469,7 +469,7 @@ with gr.Blocks(
         [pyramid_video, "30", None, 35.0, False, False, True, False, "Depthmap and Camera Branch", "True"],
         [single_cartoon_video, "1", None, 15.0, False, False, True, False, "Depthmap and Camera Branch", "True"],
         [single_oil_painting_video, "1", None, 20.0, False, True, True, True, "Depthmap and Camera Branch", "True"],
-        [canyon_video, "14", None, 40.0, False, False, True, False, "Depthmap and Camera Branch", "True"],
+        # [canyon_video, "14", None, 40.0, False, False, True, False, "Depthmap and Camera Branch", "True"],
         [room_video, "8", None, 5.0, False, False, True, False, "Depthmap and Camera Branch", "True"],
         [kitchen_video, "25", None, 50.0, False, False, True, False, "Depthmap and Camera Branch", "True"],
         [fern_video, "20", None, 45.0, False, False, True, False, "Depthmap and Camera Branch", "True"],
