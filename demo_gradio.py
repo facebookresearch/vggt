@@ -404,12 +404,12 @@ with gr.Blocks(
             <li><em>Show Points from Frame:</em> Select specific frames to display in the point cloud.</li>
             <li><em>Show Camera:</em> Toggle the display of estimated camera positions.</li>
             <li><em>Filter Sky / Filter Black Background:</em> Remove sky or black-background points.</li>
-            <li><em>Select a Prediction Mode:</em> Choose between “Depthmap and Camera Branch” or “Pointmap Branch.”</li>
+            <li><em>Select a Prediction Mode:</em> Choose between "Depthmap and Camera Branch" or "Pointmap Branch."</li>
             </ul>
         </details>
         </li>
     </ol>
-    <p><strong style="color: #0ea5e9;">Please note:</strong> <span style="color: #0ea5e9; font-weight: bold;">Our method usually only needs less than 1 second to reconstruct a scene, but the visualization of 3D points may take tens of seconds</span>.</p>
+    <p><strong style="color: #0ea5e9;">Please note:</strong> <span style="color: #0ea5e9; font-weight: bold;">Our model itself usually only needs less than 1 second to reconstruct a scene. However, visualizing the resulting 3D points may take tens of seconds due to third-party rendering and file format conversions, which are independent of VGGT's processing time.</span></p>
     </div>
     """
     )
