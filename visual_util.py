@@ -131,7 +131,7 @@ def predictions_to_glb(
             sky_mask_array = np.array(sky_mask_list)
 
             # Apply sky mask to confidence scores
-            sky_mask_binary = (sky_mask_array > 0.01).astype(np.float32)
+            sky_mask_binary = (sky_mask_array > 0.1).astype(np.float32)  
             pred_world_points_conf = pred_world_points_conf * sky_mask_binary
 
     if selected_frame_idx is not None:
@@ -155,7 +155,7 @@ def predictions_to_glb(
     else:
         conf_threshold = np.percentile(conf, conf_thres)
 
-    conf_mask = conf >= conf_threshold
+    conf_mask = (conf >= conf_threshold) & (conf > 1e-5)
 
     if mask_black_bg:
         black_bg_mask = colors_rgb.sum(axis=1) >= 16
@@ -370,6 +370,7 @@ def compute_camera_faces(cone_shape: trimesh.Trimesh) -> np.ndarray:
 def segment_sky(image_path, onnx_session, mask_filename=None):
     """
     Segments sky from an image using an ONNX model.
+    Thanks for the great model provided by https://github.com/xiongzhu666/Sky-Segmentation-and-Post-processing
 
     Args:
         image_path: Path to input image
@@ -387,9 +388,11 @@ def segment_sky(image_path, onnx_session, mask_filename=None):
     # resize the result_map to the original image size
     result_map_original = cv2.resize(result_map, (image.shape[1], image.shape[0]))
 
+    # Fix: Invert the mask so that 255 = non-sky, 0 = sky
+    # The model outputs low values for sky, high values for non-sky
     output_mask = np.zeros_like(result_map_original)
-    output_mask[result_map_original < 1] = 1
-    output_mask = output_mask.astype(np.uint8) * 255
+    output_mask[result_map_original < 32] = 255  # Use threshold of 32
+    
     os.makedirs(os.path.dirname(mask_filename), exist_ok=True)
     cv2.imwrite(mask_filename, output_mask)
     return output_mask

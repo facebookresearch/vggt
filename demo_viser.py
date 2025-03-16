@@ -10,7 +10,6 @@ import time
 import threading
 import argparse
 from typing import List, Optional
-import copy
 
 import numpy as np
 import torch
@@ -19,11 +18,14 @@ import viser
 import viser.transforms as viser_tf
 import cv2
 import requests
+
+
 try:
     import onnxruntime
 except ImportError:
     print("onnxruntime not found. Sky segmentation may not work.")
 
+from visual_util import segment_sky
 from vggt.models.vggt import VGGT
 from vggt.utils.load_fn import load_and_preprocess_images
 from vggt.utils.geometry import closed_form_inverse_se3, unproject_depth_map_to_point_map
@@ -95,7 +97,7 @@ def viser_wrapper(
     # Flatten
     points = world_points.reshape(-1, 3)
     colors_flat = (colors.reshape(-1, 3) * 255).astype(np.uint8)
-    conf = conf.reshape(-1)
+    conf_flat = conf.reshape(-1)
 
     cam_to_world_mat = closed_form_inverse_se3(extrinsics_cam)  # shape (S, 4, 4) typically
     # For convenience, we store only (3,4) portion
@@ -132,13 +134,12 @@ def viser_wrapper(
 
     # Create the main point cloud handle
     # Compute the threshold value as the given percentile
-    init_threshold_val = np.percentile(conf, init_conf_threshold)
-    init_conf_mask = conf > init_threshold_val
+    init_threshold_val = np.percentile(conf_flat, init_conf_threshold)
+    init_conf_mask = (conf_flat >= init_threshold_val) & (conf_flat > 0.1)
     point_cloud = server.scene.add_point_cloud(
         name="viser_pcd",
         points=points_centered[init_conf_mask],
         colors=colors_flat[init_conf_mask],
-        # point_size=0.0001,
         point_size=0.001,
         point_shape="circle",
     )
@@ -213,8 +214,11 @@ def viser_wrapper(
         """Update the point cloud based on current GUI selections."""
         # Here we compute the threshold value based on the current percentage
         current_percentage = gui_points_conf.value
-        threshold_val = np.percentile(conf, current_percentage)
-        conf_mask = conf > threshold_val
+        threshold_val = np.percentile(conf_flat, current_percentage)
+        
+        print(f"Threshold absolute value: {threshold_val}, percentage: {current_percentage}%")
+        
+        conf_mask = (conf_flat >= threshold_val) & (conf_flat > 1e-5)
 
         if gui_frame_selector.value == "All":
             frame_mask = np.ones_like(conf_mask, dtype=bool)
@@ -335,78 +339,11 @@ def apply_sky_segmentation(conf: np.ndarray, image_folder: str) -> np.ndarray:
     # Convert list to numpy array with shape S×H×W
     sky_mask_array = np.array(sky_mask_list)
     # Apply sky mask to confidence scores
-    sky_mask_binary = (sky_mask_array > 0.01).astype(np.float32)
+    sky_mask_binary = (sky_mask_array > 0.1).astype(np.float32)
     conf = conf * sky_mask_binary
     
     print("Sky segmentation applied successfully")
     return conf
-
-
-
-def segment_sky(image_path, onnx_session, mask_filename=None):
-    """
-    Segments sky from an image using an ONNX model.
-
-    Args:
-        image_path: Path to input image
-        onnx_session: ONNX runtime session with loaded model
-        mask_filename: Path to save the output mask
-
-    Returns:
-        np.ndarray: Binary mask where 255 indicates non-sky regions
-    """
-    assert mask_filename is not None
-    image = cv2.imread(image_path)
-
-    result_map = run_skyseg(onnx_session, [320, 320], image)
-    # resize the result_map to the original image size
-    result_map_original = cv2.resize(result_map, (image.shape[1], image.shape[0]))
-
-    output_mask = np.zeros_like(result_map_original)
-    output_mask[result_map_original < 1] = 1
-    output_mask = output_mask.astype(np.uint8) * 255
-    os.makedirs(os.path.dirname(mask_filename), exist_ok=True)
-    cv2.imwrite(mask_filename, output_mask)
-    return output_mask
-
-
-def run_skyseg(onnx_session, input_size, image):
-    """
-    Runs sky segmentation inference using ONNX model.
-
-    Args:
-        onnx_session: ONNX runtime session
-        input_size: Target size for model input (width, height)
-        image: Input image in BGR format
-
-    Returns:
-        np.ndarray: Segmentation mask
-    """
-    # Pre process:Resize, BGR->RGB, Transpose, PyTorch standardization, float32 cast
-    temp_image = copy.deepcopy(image)
-    resize_image = cv2.resize(temp_image, dsize=(input_size[0], input_size[1]))
-    x = cv2.cvtColor(resize_image, cv2.COLOR_BGR2RGB)
-    x = np.array(x, dtype=np.float32)
-    mean = [0.485, 0.456, 0.406]
-    std = [0.229, 0.224, 0.225]
-    x = (x / 255 - mean) / std
-    x = x.transpose(2, 0, 1)
-    x = x.reshape(-1, 3, input_size[0], input_size[1]).astype("float32")
-
-    # Inference
-    input_name = onnx_session.get_inputs()[0].name
-    output_name = onnx_session.get_outputs()[0].name
-    onnx_result = onnx_session.run([output_name], {input_name: x})
-
-    # Post process
-    onnx_result = np.array(onnx_result).squeeze()
-    min_value = np.min(onnx_result)
-    max_value = np.max(onnx_result)
-    onnx_result = (onnx_result - min_value) / (max_value - min_value)
-    onnx_result *= 255
-    onnx_result = onnx_result.astype("uint8")
-
-    return onnx_result
 
 
 
