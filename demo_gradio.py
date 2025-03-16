@@ -214,6 +214,10 @@ def gradio_demo(
     prediction_save_path = os.path.join(target_dir, "predictions.npz")
     np.savez(prediction_save_path, **predictions)
 
+    # Handle None frame_filter
+    if frame_filter is None:
+        frame_filter = "All"
+        
     # Build a GLB file name
     glbfile = os.path.join(
         target_dir,
@@ -389,9 +393,9 @@ with gr.Blocks(
 
     <h3>Getting Started:</h3>
     <ol>
-        <li><strong>Upload Your Data:</strong> Use the “Upload Video” or “Upload Images” buttons on the left to provide your input. Videos will be automatically split into individual frames (one frame per second).</li>
+        <li><strong>Upload Your Data:</strong> Use the "Upload Video" or "Upload Images" buttons on the left to provide your input. Videos will be automatically split into individual frames (one frame per second).</li>
         <li><strong>Preview:</strong> Your uploaded images will appear in the gallery on the left.</li>
-        <li><strong>Reconstruct:</strong> Click the “Reconstruct” button to start the 3D reconstruction process.</li>
+        <li><strong>Reconstruct:</strong> Click the "Reconstruct" button to start the 3D reconstruction process.</li>
         <li><strong>Visualize:</strong> The 3D reconstruction will appear in the viewer on the right. You can rotate, pan, and zoom to explore the model, and download the GLB file. Note the visualization of 3D points may be slow for a large number of input images.</li>
         <li>
         <strong>Adjust Visualization (Optional):</strong>
