@@ -109,6 +109,8 @@ with torch.no_grad():
     track_list, vis_score, conf_score = model.track_head(aggregated_tokens_list, images, ps_idx, query_points=query_points[None])
 ```
 
+Furthermore, if certain pixels in the input frames are unwanted (e.g., sea, glass), you can mask them by setting the corresponding pixel values to 0 or 1, and then pass the masked images to the model.
+
 
 ## Visualization
 
