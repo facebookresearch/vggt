@@ -8,3 +8,4 @@ scipy
 onnxruntime
 requests
 trimesh
+matplotlib
