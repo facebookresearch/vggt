@@ -151,15 +151,20 @@ def predictions_to_glb(
 
     if image_masks is not None:
         target_dir_masks = target_dir + "/masks"
-        mask_ist = sorted(os.listdir(target_dir_masks))
-        image_mask_list = []
-        for i, mask_name in enumerate(mask_ist):
-            mask_filepath = os.path.join(target_dir_masks, mask_name)
-            mask = cv2.imread(mask_filepath)
-            mask = cv2.resize(mask, (H, W))
-            image_mask_list.append(mask)
-        image_mask_array = np.array(image_mask_list)
-        mask_rgb = (image_mask_array.reshape(-1, 3) * 255).astype(np.uint8)
+        mask_list = sorted(os.listdir(target_dir_masks))
+
+        if len(mask_list) != len(image_masks):
+            print("Number of masks does not match number of images -> using rgb colors")
+            image_masks = None
+        else:
+            image_mask_list = []
+            for i, mask_name in enumerate(mask_list):
+                mask_filepath = os.path.join(target_dir_masks, mask_name)
+                mask = cv2.imread(mask_filepath)
+                mask = cv2.resize(mask, (W, H))
+                image_mask_list.append(mask)
+            image_mask_array = np.array(image_mask_list)
+            mask_rgb = (image_mask_array.reshape(-1, 3)).astype(np.uint8)
     conf = pred_world_points_conf.reshape(-1)
     # Convert percentage threshold to actual confidence value
     if conf_thres == 0.0:

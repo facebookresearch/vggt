@@ -503,9 +503,6 @@ with gr.Blocks(
             input_images = gr.File(
                 file_count="multiple", label="Upload Images", interactive=True
             )
-            input_masks = gr.File(
-                file_count="multiple", label="Upload Masks", interactive=True
-            )
 
             image_gallery = gr.Gallery(
                 label="Preview",
@@ -514,6 +511,9 @@ with gr.Blocks(
                 show_download_button=True,
                 object_fit="contain",
                 preview=True,
+            )
+            input_masks = gr.File(
+                file_count="multiple", label="Upload Masks", interactive=True
             )
 
         with gr.Column(scale=4):
