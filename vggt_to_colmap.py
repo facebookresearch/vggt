@@ -521,6 +521,70 @@ def write_colmap_points3D_bin(file_path, points3D):
             for img_id, point2d_idx in track:
                 fid.write(struct.pack('<II', img_id + 1, point2d_idx))
 
+def write_points3d_ply(file_path:str, points3D:list[dict]) -> None:  
+    """Write 3D points and tracks to ply format defined by:
+     https://people.math.sc.edu/Burkardt/data/ply/ply.txt  
+
+    Inputs: 
+        - file_path(str): path to save the .ply file. 
+        - points3D(list[dict]): list of points predicted by the model. Each dict 
+        (point) contains 5 variables: 
+            'id': identification value of the point.
+            'xyz': array of coordinates for the point. 
+            'rgb': array of rgb color.
+            'error': ?
+            'track': list of tuples of tracks that have generated the point. 
+    """
+
+    def add_header(num_vertices:int) -> list[str]: 
+        """Define the header of a ply file as done in the reference. 
+
+        Inputs: 
+         - num_vertices(int): number of points in the reconstruction. 
+
+         Output: 
+         - ply_header(list[str]): contains the header for the file. 
+        """
+        
+        ply_header = ["ply", 
+                    "format ascii 1.0",  
+                    "element vertex {}".format(num_vertices),
+                    "property float32 x",
+                    "property float32 y",
+                    "property float32 z",
+                    "property uint8 red",
+                    "property uint8 green",
+                    "property uint8 blue", 
+                    "end_header"]
+
+        return ply_header
+
+    def add_data(points3D: list[dict]) -> list[str]: 
+        """Add vertex points and it's colors to a list. Each point defines a row 
+        in the file. 
+        
+        Output: 
+         - ply_points(list[str]): data of the file. 
+        """
+        ply_points = []
+
+        for point in points3D: 
+            x, y, z = point["xyz"]
+            r, g, b = point["rgb"]
+            row = f"{x} {y} {z} {r} {g} {b}"
+            
+            ply_points.append(row)
+        
+        return ply_points   
+        
+    header = add_header(len(points3D))
+    ply_points = add_data(points3D)
+
+    file_srt = "\n".join(header + ply_points + [""])
+
+    with open(file_path, "w") as file: 
+        file.write(file_srt)
+    
 def main():
     parser = argparse.ArgumentParser(description="Convert images to COLMAP format using VGGT")
     parser.add_argument("--image_dir", type=str, required=True, 
@@ -542,6 +606,8 @@ def main():
     parser.add_argument("--prediction_mode", type=str, default="Depthmap and Camera Branch",
                         choices=["Depthmap and Camera Branch", "Pointmap Branch"],
                         help="Which prediction branch to use")
+    parser.add_argument("--export_ply", action="store_true", 
+                        help="Export reconstructed points in ply format")
     
     args = parser.parse_args()
     
@@ -588,8 +654,11 @@ def main():
         write_colmap_points3D_txt(
             os.path.join(args.output_dir, "points3D.txt"), 
             points3D)
-    
-    print(f"COLMAP files successfully written to {args.output_dir}")
+        
+    if args.export_ply: 
+        write_points3d_ply(os.path.join(args.output_dir, "points3D.ply"), points3D)
 
+    print(f"COLMAP files successfully written to {args.output_dir}")
+    
 if __name__ == "__main__":
     main()
