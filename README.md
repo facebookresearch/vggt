@@ -140,7 +140,7 @@ If you're running into SSL certificate errors on macOS (e.g., `CERTIFICATE_VERIF
 To fix this, run the following command in your terminal:
 
 ```bash
-/Applications/Python\ 3.10/Install\ Certificates.command
+/Applications/Python\ ${YOUR_PYTHON_VERSION}/Install\ Certificates.command
 ```
 
 This will configure Python to trust system certificates and should resolve most SSL issues.
