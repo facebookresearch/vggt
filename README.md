@@ -136,7 +136,14 @@ pip install -r requirements_demo.txt
 
 Our Gradio-based interface allows you to upload images/videos, run reconstruction, and interactively explore the 3D scene in your browser. You can launch this in your local machine or try it on [Hugging Face](https://huggingface.co/spaces/facebook/vggt).
 
+If you're running into SSL certificate errors on macOS (e.g., `CERTIFICATE_VERIFY_FAILED`), you might need to install Python's root certificates. 
+To fix this, run the following command in your terminal:
 
+```bash
+/Applications/Python\ 3.10/Install\ Certificates.command
+```
+
+This will configure Python to trust system certificates and should resolve most SSL issues.
 ```bash
 python demo_gradio.py
 ```
