@@ -9,3 +9,4 @@ onnxruntime
 requests
 trimesh
 matplotlib
+pydantic==2.10.6

@@ -25,6 +25,7 @@ def predictions_to_glb(
     mask_sky=False,
     target_dir=None,
     prediction_mode="Predicted Pointmap",
+    image_masks=None
 ) -> trimesh.Scene:
     """
     Converts VGGT predictions to a 3D scene represented as a GLB file.
@@ -148,6 +149,22 @@ def predictions_to_glb(
         colors_rgb = images
     colors_rgb = (colors_rgb.reshape(-1, 3) * 255).astype(np.uint8)
 
+    if image_masks is not None:
+        target_dir_masks = target_dir + "/masks"
+        mask_list = sorted(os.listdir(target_dir_masks))
+
+        if len(mask_list) != len(image_masks):
+            print("Number of masks does not match number of images -> using rgb colors")
+            image_masks = None
+        else:
+            image_mask_list = []
+            for i, mask_name in enumerate(mask_list):
+                mask_filepath = os.path.join(target_dir_masks, mask_name)
+                mask = cv2.imread(mask_filepath)
+                mask = cv2.resize(mask, (W, H))
+                image_mask_list.append(mask)
+            image_mask_array = np.array(image_mask_list)
+            mask_rgb = (image_mask_array.reshape(-1, 3)).astype(np.uint8)
     conf = pred_world_points_conf.reshape(-1)
     # Convert percentage threshold to actual confidence value
     if conf_thres == 0.0:
@@ -170,6 +187,9 @@ def predictions_to_glb(
     vertices_3d = vertices_3d[conf_mask]
     colors_rgb = colors_rgb[conf_mask]
 
+    if image_masks is not None:
+        mask_rgb = mask_rgb[conf_mask]
+
     if vertices_3d is None or np.asarray(vertices_3d).size == 0:
         vertices_3d = np.array([[1, 0, 0]])
         colors_rgb = np.array([[255, 255, 255]])
@@ -187,8 +207,11 @@ def predictions_to_glb(
     # Initialize a 3D scene
     scene_3d = trimesh.Scene()
 
-    # Add point cloud data to the scene
-    point_cloud_data = trimesh.PointCloud(vertices=vertices_3d, colors=colors_rgb)
+    #visualize mask if given - otherwise colorize point cloud
+    if image_masks is not None:
+        point_cloud_data = trimesh.PointCloud(vertices=vertices_3d, colors=mask_rgb)
+    else:
+        point_cloud_data = trimesh.PointCloud(vertices=vertices_3d, colors=colors_rgb)
 
     scene_3d.add_geometry(point_cloud_data)
 
