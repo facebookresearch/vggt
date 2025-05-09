@@ -9,7 +9,7 @@ from PIL import Image
 from torchvision import transforms as TF
 
 
-def load_and_preprocess_images(image_path_list, mode="crop"):
+def load_and_preprocess_images(image_path_list, mode="crop", grayscale=False):    
     """
     A quick start function to load and preprocess images for model input.
     This assumes the images should have the same shape for easier batching, but our model can also work well with different shapes.
@@ -20,6 +20,7 @@ def load_and_preprocess_images(image_path_list, mode="crop"):
                              - "crop" (default): Sets width to 518px and center crops height if needed.
                              - "pad": Preserves all pixels by making the largest dimension 518px
                                and padding the smaller dimension to reach a square shape.
+        grayscale (bool, optional): If True, convert images to grayscale. Default is False.
 
     Returns:
         torch.Tensor: Batched tensor of preprocessed images with shape (N, 3, H, W)
@@ -56,14 +57,14 @@ def load_and_preprocess_images(image_path_list, mode="crop"):
         img = Image.open(image_path)
 
         # If there's an alpha channel, blend onto white background:
-        if img.mode == "RGBA":
+        if not grayscale and img.mode == "RGBA":
             # Create white background
             background = Image.new("RGBA", img.size, (255, 255, 255, 255))
             # Alpha composite onto the white background
             img = Image.alpha_composite(background, img)
 
         # Now convert to "RGB" (this step assigns white for transparent areas)
-        img = img.convert("RGB")
+        img = img.convert("L" if grayscale else "RGB")
 
         width, height = img.size
         
