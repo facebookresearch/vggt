@@ -209,7 +209,7 @@ class DPTHead(nn.Module):
             if frames_start_idx is not None and frames_end_idx is not None:
                 x = x[:, frames_start_idx:frames_end_idx]
 
-            x = x.view(B * S, -1, x.shape[-1])
+            x = x.reshape(B * S, -1, x.shape[-1])
 
             x = self.norm(x)
 
