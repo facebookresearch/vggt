@@ -79,13 +79,13 @@ def run_model(target_dir) -> dict:
 
 def run(
     target_dir,
-    conf_thres=3.0,
+    conf_thres=50,
     frame_filter="All",
     mask_black_bg=False,
     mask_white_bg=False,
     show_cam=False,
     mask_sky=False,
-    prediction_mode="Pointmap Regression",
+    prediction_mode="Depthmap",
 ):
     start_time = time.time()
     gc.collect()
@@ -108,7 +108,8 @@ def run(
     # Build a GLB file name
     glbfile = os.path.join(
         target_dir,
-        f"glbscene.glb",
+        "glbscene.glb",
+        #f"glbscene_{conf_thres}_{frame_filter.replace('.', '_').replace(':', '').replace(' ', '_')}_maskb{mask_black_bg}_maskw{mask_white_bg}_cam{show_cam}_sky{mask_sky}_pred{prediction_mode.replace(' ', '_')}.glb",
     )
 
     # Convert predictions to GLB
@@ -121,7 +122,7 @@ def run(
         show_cam=show_cam,
         mask_sky=mask_sky,
         target_dir=target_dir,
-        prediction_mode="Depthmap",
+        prediction_mode=prediction_mode,
     )
     glbscene.export(file_obj=glbfile)
 
@@ -136,7 +137,7 @@ def run(
 
 
 def main():
-    run("input_images")
+    run("input_images_1")
 
 
 if __name__ == '__main__':
