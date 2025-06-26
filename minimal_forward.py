@@ -121,7 +121,7 @@ def run(
         show_cam=show_cam,
         mask_sky=mask_sky,
         target_dir=target_dir,
-        prediction_mode=prediction_mode,
+        prediction_mode="Depthmap",
     )
     glbscene.export(file_obj=glbfile)
 
@@ -136,7 +136,7 @@ def run(
 
 
 def main():
-    run("input_images_1")
+    run("input_images")
 
 
 if __name__ == '__main__':
