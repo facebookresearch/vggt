@@ -2,7 +2,7 @@ import os
 
 from PIL import Image
 
-from utils.git_utils import GIT_ROOT
+from sim.utils.git_utils import GIT_ROOT
 
 
 DATA_PATH = f"{GIT_ROOT}/.runs/data/"
@@ -23,8 +23,8 @@ class PredictionData:
             for image_path in image_path_list
         ]
 
-        self.target_dir = f"{DATA_PATH}/input_images_{PredictionOutput.id}"
-        PredictionOutput.id += 1
+        self.target_dir = f"{DATA_PATH}/input_images_{PredictionData.id}"
+        PredictionData.id += 1
         os.makedirs(f"{self.target_dir}/images/")
         for image, name in zip(self.images, self.image_names):
             path = f"{self.target_dir}/images/{name}"
