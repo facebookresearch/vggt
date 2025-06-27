@@ -147,3 +147,6 @@ skyseg.onnx
 # pixi environments
 .pixi
 *.egg-info
+
+.DS_Store
+cimat/data
