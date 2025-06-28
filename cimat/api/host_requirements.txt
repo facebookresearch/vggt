@@ -1,0 +1,11 @@
+fastapi
+uvicorn
+pyngrok
+requests
+Pillow
+numpy
+torch==2.3.1
+torchvision==0.18.1
+huggingface_hub
+einops
+safetensors

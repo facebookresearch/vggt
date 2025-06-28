@@ -150,3 +150,5 @@ skyseg.onnx
 
 .DS_Store
 cimat/data
+.gradio
+.runs

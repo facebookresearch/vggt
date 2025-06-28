@@ -137,7 +137,7 @@ def run(
 
 
 def main():
-    run("input_images_1")
+    run("cimat/input_images")
 
 
 if __name__ == '__main__':
