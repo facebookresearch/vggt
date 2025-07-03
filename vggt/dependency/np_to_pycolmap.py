@@ -51,6 +51,8 @@ def batch_np_matrix_to_pycolmap(
     assert len(points3d) == P
     assert image_size.shape[0] == 2
 
+    reproj_mask = None
+
     if max_reproj_error is not None:
         projected_points_2d, projected_points_cam = project_3D_points_np(points3d, extrinsics, intrinsics)
         projected_diff = np.linalg.norm(projected_points_2d - tracks, axis=-1)
