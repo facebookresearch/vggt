@@ -456,7 +456,7 @@ class Trainer:
             # measure data loading time
             data_time.update(time.time() - end)
             data_times.append(data_time.val)
-
+            
             with torch.cuda.amp.autocast(enabled=False):
                 batch = self._process_batch(batch)
             batch = copy_data_to_device(batch, self.device, non_blocking=True)
@@ -547,6 +547,7 @@ class Trainer:
             # measure data loading time
             data_time.update(time.time() - end)
             data_times.append(data_time.val)
+
             
             with torch.cuda.amp.autocast(enabled=False):
                 batch = self._process_batch(batch)

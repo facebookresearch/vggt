@@ -155,7 +155,7 @@ class Co3dDataset(BaseDataset):
         self.sequence_list_len = len(self.sequence_list)
         self.total_frame_num = total_frame_num
 
-        status = "Training" if self.training else "Test"
+        status = "Training" if self.training else "Testing"
         logging.info(f"{status}: Co3D Data size: {self.sequence_list_len}")
         logging.info(f"{status}: Co3D Data dataset length: {len(self)}")
 

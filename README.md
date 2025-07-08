@@ -275,7 +275,7 @@ Thanks to these great repositories: [PoseDiffusion](https://github.com/facebookr
 
 ## Checklist
 
-- [ ] Release the training code
+- [x] Release the training code
 - [ ] Release VGGT-500M and VGGT-200M
 
 

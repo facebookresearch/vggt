@@ -86,7 +86,7 @@ logging:
 checkpoint:
   save_dir: logs/${exp_name}/ckpts
   save_freq: 5
-  resume_checkpoint_path: /fsx-repligen/jianyuan/transfer_buffer/ckpts/model.pt
+  resume_checkpoint_path: /YOUR/PATH/TO/CKPT
   strict: False
 
 

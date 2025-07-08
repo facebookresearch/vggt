@@ -4,16 +4,30 @@
 # This source code is licensed under the license found in the
 # LICENSE file in the root directory of this source tree.
 
-
+import argparse
 from hydra import initialize, compose
 from omegaconf import DictConfig, OmegaConf
 from trainer import Trainer
 
 
-with initialize(version_base=None, config_path="config"):
-    cfg = compose(config_name="default")      # loads default.yaml
+def main():
+    parser = argparse.ArgumentParser(description="Train model with configurable YAML file")
+    parser.add_argument(
+        "--config", 
+        type=str, 
+        default="default",
+        help="Name of the config file (without .yaml extension, default: default)"
+    )
+    args = parser.parse_args()
 
-trainer = Trainer(**cfg)
-trainer.run()
+    with initialize(version_base=None, config_path="config"):
+        cfg = compose(config_name=args.config)
+
+    trainer = Trainer(**cfg)
+    trainer.run()
+
+
+if __name__ == "__main__":
+    main()
 
 
