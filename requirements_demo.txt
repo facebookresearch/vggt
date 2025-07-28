@@ -9,3 +9,9 @@ onnxruntime
 requests
 trimesh
 matplotlib
+pydantic==2.10.6
+# feel free to skip the dependencies below if you do not need demo_colmap.py
+pycolmap==3.10.0
+pyceres==2.3
+git+https://github.com/jytime/LightGlue.git#egg=lightglue
+

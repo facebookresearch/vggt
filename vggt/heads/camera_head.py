@@ -50,12 +50,7 @@ class CameraHead(nn.Module):
         # Build the trunk using a sequence of transformer blocks.
         self.trunk = nn.Sequential(
             *[
-                Block(
-                    dim=dim_in,
-                    num_heads=num_heads,
-                    mlp_ratio=mlp_ratio,
-                    init_values=init_values,
-                )
+                Block(dim=dim_in, num_heads=num_heads, mlp_ratio=mlp_ratio, init_values=init_values)
                 for _ in range(trunk_depth)
             ]
         )
@@ -73,12 +68,7 @@ class CameraHead(nn.Module):
 
         # Adaptive layer normalization without affine parameters.
         self.adaln_norm = nn.LayerNorm(dim_in, elementwise_affine=False, eps=1e-6)
-        self.pose_branch = Mlp(
-            in_features=dim_in,
-            hidden_features=dim_in // 2,
-            out_features=self.target_dim,
-            drop=0,
-        )
+        self.pose_branch = Mlp(in_features=dim_in, hidden_features=dim_in // 2, out_features=self.target_dim, drop=0)
 
     def forward(self, aggregated_tokens_list: list, num_iterations: int = 4) -> list:
         """
@@ -107,13 +97,13 @@ class CameraHead(nn.Module):
         Iteratively refine camera pose predictions.
 
         Args:
-            pose_tokens (torch.Tensor): Normalized camera tokens with shape [B, 1, C].
+            pose_tokens (torch.Tensor): Normalized camera tokens with shape [B, S, C].
             num_iterations (int): Number of refinement iterations.
 
         Returns:
             list: List of activated camera encodings from each iteration.
         """
-        B, S, C = pose_tokens.shape  # S is expected to be 1.
+        B, S, C = pose_tokens.shape
         pred_pose_enc = None
         pred_pose_enc_list = []
 
@@ -144,10 +134,7 @@ class CameraHead(nn.Module):
 
             # Apply final activation functions for translation, quaternion, and field-of-view.
             activated_pose = activate_pose(
-                pred_pose_enc,
-                trans_act=self.trans_act,
-                quat_act=self.quat_act,
-                fl_act=self.fl_act,
+                pred_pose_enc, trans_act=self.trans_act, quat_act=self.quat_act, fl_act=self.fl_act
             )
             pred_pose_enc_list.append(activated_pose)
 

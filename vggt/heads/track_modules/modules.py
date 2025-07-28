@@ -45,20 +45,9 @@ class ResidualBlock(nn.Module):
         super(ResidualBlock, self).__init__()
 
         self.conv1 = nn.Conv2d(
-            in_planes,
-            planes,
-            kernel_size=kernel_size,
-            padding=1,
-            stride=stride,
-            padding_mode="zeros",
+            in_planes, planes, kernel_size=kernel_size, padding=1, stride=stride, padding_mode="zeros"
         )
-        self.conv2 = nn.Conv2d(
-            planes,
-            planes,
-            kernel_size=kernel_size,
-            padding=1,
-            padding_mode="zeros",
-        )
+        self.conv2 = nn.Conv2d(planes, planes, kernel_size=kernel_size, padding=1, padding_mode="zeros")
         self.relu = nn.ReLU(inplace=True)
 
         num_groups = planes // 8
@@ -92,10 +81,7 @@ class ResidualBlock(nn.Module):
         if stride == 1:
             self.downsample = None
         else:
-            self.downsample = nn.Sequential(
-                nn.Conv2d(in_planes, planes, kernel_size=1, stride=stride),
-                self.norm3,
-            )
+            self.downsample = nn.Sequential(nn.Conv2d(in_planes, planes, kernel_size=1, stride=stride), self.norm3)
 
     def forward(self, x):
         y = x
@@ -151,7 +137,7 @@ class AttnBlock(nn.Module):
         num_heads,
         attn_class: Callable[..., nn.Module] = nn.MultiheadAttention,
         mlp_ratio=4.0,
-        **block_kwargs
+        **block_kwargs,
     ):
         """
         Self attention block

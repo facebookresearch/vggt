@@ -112,24 +112,15 @@ def viser_wrapper(
     frame_indices = np.repeat(np.arange(S), H * W)
 
     # Build the viser GUI
-    gui_show_frames = server.gui.add_checkbox(
-        "Show Cameras",
-        initial_value=True,
-    )
+    gui_show_frames = server.gui.add_checkbox("Show Cameras", initial_value=True)
 
     # Now the slider represents percentage of points to filter out
     gui_points_conf = server.gui.add_slider(
-        "Confidence Percent",
-        min=0,
-        max=100,
-        step=0.1,
-        initial_value=init_conf_threshold,
+        "Confidence Percent", min=0, max=100, step=0.1, initial_value=init_conf_threshold
     )
 
     gui_frame_selector = server.gui.add_dropdown(
-        "Show Points from Frames",
-        options=["All"] + [str(i) for i in range(S)],
-        initial_value="All",
+        "Show Points from Frames", options=["All"] + [str(i) for i in range(S)], initial_value="All"
     )
 
     # Create the main point cloud handle
@@ -200,12 +191,7 @@ def viser_wrapper(
 
             # Add the frustum
             frustum_cam = server.scene.add_camera_frustum(
-                f"frame_{img_id}/frustum",
-                fov=fov,
-                aspect=w / h,
-                scale=0.05,
-                image=img,
-                line_width=1.0,
+                f"frame_{img_id}/frustum", fov=fov, aspect=w / h, scale=0.05, image=img, line_width=1.0
             )
             frustums.append(frustum_cam)
             attach_callback(frustum_cam, frame_axis)
@@ -373,7 +359,7 @@ def main():
     images = load_and_preprocess_images(image_names).to(device)
     print(f"Preprocessed images shape: {images.shape}")
 
-    print("Running inference...")    
+    print("Running inference...")
     dtype = torch.bfloat16 if torch.cuda.get_device_capability()[0] >= 8 else torch.float16
 
     with torch.no_grad():

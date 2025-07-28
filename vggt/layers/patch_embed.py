@@ -47,10 +47,7 @@ class PatchEmbed(nn.Module):
 
         image_HW = make_2tuple(img_size)
         patch_HW = make_2tuple(patch_size)
-        patch_grid_size = (
-            image_HW[0] // patch_HW[0],
-            image_HW[1] // patch_HW[1],
-        )
+        patch_grid_size = (image_HW[0] // patch_HW[0], image_HW[1] // patch_HW[1])
 
         self.img_size = image_HW
         self.patch_size = patch_HW

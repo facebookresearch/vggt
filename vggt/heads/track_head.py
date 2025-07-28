@@ -99,10 +99,6 @@ class TrackHead(nn.Module):
             iters = self.iters
 
         # Perform tracking using the extracted features
-        coord_preds, vis_scores, conf_scores = self.tracker(
-            query_points=query_points,
-            fmaps=feature_maps,
-            iters=iters,
-        )
+        coord_preds, vis_scores, conf_scores = self.tracker(query_points=query_points, fmaps=feature_maps, iters=iters)
 
         return coord_preds, vis_scores, conf_scores

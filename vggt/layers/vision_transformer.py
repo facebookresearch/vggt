@@ -93,10 +93,6 @@ class DinoVisionTransformer(nn.Module):
         super().__init__()
         norm_layer = partial(nn.LayerNorm, eps=1e-6)
 
-        # tricky but makes it work
-        self.use_checkpoint = False
-        #
-
         self.num_features = self.embed_dim = embed_dim  # num_features for consistency with other models
         self.num_tokens = 1
         self.n_blocks = depth
@@ -105,6 +101,7 @@ class DinoVisionTransformer(nn.Module):
         self.num_register_tokens = num_register_tokens
         self.interpolate_antialias = interpolate_antialias
         self.interpolate_offset = interpolate_offset
+        self.use_reentrant = False # hardcoded to False
 
         self.patch_embed = embed_layer(img_size=img_size, patch_size=patch_size, in_chans=in_chans, embed_dim=embed_dim)
         num_patches = self.patch_embed.num_patches
@@ -224,14 +221,7 @@ class DinoVisionTransformer(nn.Module):
         x = x + self.interpolate_pos_encoding(x, w, h)
 
         if self.register_tokens is not None:
-            x = torch.cat(
-                (
-                    x[:, :1],
-                    self.register_tokens.expand(x.shape[0], -1, -1),
-                    x[:, 1:],
-                ),
-                dim=1,
-            )
+            x = torch.cat((x[:, :1], self.register_tokens.expand(x.shape[0], -1, -1), x[:, 1:]), dim=1)
 
         return x
 
@@ -239,7 +229,7 @@ class DinoVisionTransformer(nn.Module):
         x = [self.prepare_tokens_with_masks(x, masks) for x, masks in zip(x_list, masks_list)]
 
         for blk in self.blocks:
-            if self.use_checkpoint:
+            if self.training:
                 x = checkpoint(blk, x, use_reentrant=self.use_reentrant)
             else:
                 x = blk(x)
@@ -266,7 +256,7 @@ class DinoVisionTransformer(nn.Module):
         x = self.prepare_tokens_with_masks(x, masks)
 
         for blk in self.blocks:
-            if self.use_checkpoint:
+            if self.training:
                 x = checkpoint(blk, x, use_reentrant=self.use_reentrant)
             else:
                 x = blk(x)

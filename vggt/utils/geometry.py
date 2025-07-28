@@ -9,6 +9,9 @@ import torch
 import numpy as np
 
 
+from vggt.dependency.distortion import apply_distortion, iterative_undistortion, single_undistortion
+
+
 def unproject_depth_map_to_point_map(
     depth_map: np.ndarray, extrinsics_cam: np.ndarray, intrinsics_cam: np.ndarray
 ) -> np.ndarray:
@@ -164,3 +167,158 @@ def closed_form_inverse_se3(se3, R=None, T=None):
     inverted_matrix[:, :3, 3:] = top_right
 
     return inverted_matrix
+
+
+# TODO: this code can be further cleaned up
+
+
+def project_world_points_to_camera_points_batch(world_points, cam_extrinsics):
+    """
+    Transforms 3D points to 2D using extrinsic and intrinsic parameters.
+    Args:
+        world_points (torch.Tensor): 3D points of shape BxSxHxWx3.
+        cam_extrinsics (torch.Tensor): Extrinsic parameters of shape BxSx3x4.
+    Returns:
+    """
+    # TODO: merge this into project_world_points_to_cam
+    
+    # device = world_points.device
+    # with torch.autocast(device_type=device.type, enabled=False):
+    ones = torch.ones_like(world_points[..., :1])  # shape: (B, S, H, W, 1)
+    world_points_h = torch.cat([world_points, ones], dim=-1)  # shape: (B, S, H, W, 4)
+
+    # extrinsics: (B, S, 3, 4) -> (B, S, 1, 1, 3, 4)
+    extrinsics_exp = cam_extrinsics.unsqueeze(2).unsqueeze(3)
+
+    # world_points_h: (B, S, H, W, 4) -> (B, S, H, W, 4, 1)
+    world_points_h_exp = world_points_h.unsqueeze(-1)
+
+    # Now perform the matrix multiplication
+    # (B, S, 1, 1, 3, 4) @ (B, S, H, W, 4, 1) broadcasts to (B, S, H, W, 3, 1)
+    camera_points = torch.matmul(extrinsics_exp, world_points_h_exp).squeeze(-1)
+
+    return camera_points
+
+
+
+def project_world_points_to_cam(
+    world_points,
+    cam_extrinsics,
+    cam_intrinsics=None,
+    distortion_params=None,
+    default=0,
+    only_points_cam=False,
+):
+    """
+    Transforms 3D points to 2D using extrinsic and intrinsic parameters.
+    Args:
+        world_points (torch.Tensor): 3D points of shape Px3.
+        cam_extrinsics (torch.Tensor): Extrinsic parameters of shape Bx3x4.
+        cam_intrinsics (torch.Tensor): Intrinsic parameters of shape Bx3x3.
+        distortion_params (torch.Tensor): Extra parameters of shape BxN, which is used for radial distortion.
+    Returns:
+        torch.Tensor: Transformed 2D points of shape BxNx2.
+    """
+    device = world_points.device
+    # with torch.autocast(device_type=device.type, dtype=torch.double):
+    with torch.autocast(device_type=device.type, enabled=False):
+        N = world_points.shape[0]  # Number of points
+        B = cam_extrinsics.shape[0]  # Batch size, i.e., number of cameras
+        world_points_homogeneous = torch.cat(
+            [world_points, torch.ones_like(world_points[..., 0:1])], dim=1
+        )  # Nx4
+        # Reshape for batch processing
+        world_points_homogeneous = world_points_homogeneous.unsqueeze(0).expand(
+            B, -1, -1
+        )  # BxNx4
+
+        # Step 1: Apply extrinsic parameters
+        # Transform 3D points to camera coordinate system for all cameras
+        cam_points = torch.bmm(
+            cam_extrinsics, world_points_homogeneous.transpose(-1, -2)
+        )
+
+        if only_points_cam:
+            return None, cam_points
+
+        # Step 2: Apply intrinsic parameters and (optional) distortion
+        image_points = img_from_cam(cam_intrinsics, cam_points, distortion_params, default=default)
+
+        return image_points, cam_points
+
+
+
+def img_from_cam(cam_intrinsics, cam_points, distortion_params=None, default=0.0):
+    """
+    Applies intrinsic parameters and optional distortion to the given 3D points.
+
+    Args:
+        cam_intrinsics (torch.Tensor): Intrinsic camera parameters of shape Bx3x3.
+        cam_points (torch.Tensor): 3D points in camera coordinates of shape Bx3xN.
+        distortion_params (torch.Tensor, optional): Distortion parameters of shape BxN, where N can be 1, 2, or 4.
+        default (float, optional): Default value to replace NaNs in the output.
+
+    Returns:
+        pixel_coords (torch.Tensor): 2D points in pixel coordinates of shape BxNx2.
+    """
+
+    # Normalized device coordinates (NDC)
+    cam_points = cam_points / cam_points[:, 2:3, :]
+    ndc_xy = cam_points[:, :2, :]
+
+    # Apply distortion if distortion_params are provided
+    if distortion_params is not None:
+        x_distorted, y_distorted = apply_distortion(distortion_params, ndc_xy[:, 0], ndc_xy[:, 1])
+        distorted_xy = torch.stack([x_distorted, y_distorted], dim=1)
+    else:
+        distorted_xy = ndc_xy
+
+    # Prepare cam_points for batch matrix multiplication
+    cam_coords_homo = torch.cat(
+        (distorted_xy, torch.ones_like(distorted_xy[:, :1, :])), dim=1
+    )  # Bx3xN
+    # Apply intrinsic parameters using batch matrix multiplication
+    pixel_coords = torch.bmm(cam_intrinsics, cam_coords_homo)  # Bx3xN
+
+    # Extract x and y coordinates
+    pixel_coords = pixel_coords[:, :2, :]  # Bx2xN
+
+    # Replace NaNs with default value
+    pixel_coords = torch.nan_to_num(pixel_coords, nan=default)
+
+    return pixel_coords.transpose(1, 2)  # BxNx2
+
+
+
+
+def cam_from_img(pred_tracks, intrinsics, extra_params=None):
+    """
+    Normalize predicted tracks based on camera intrinsics.
+    Args:
+    intrinsics (torch.Tensor): The camera intrinsics tensor of shape [batch_size, 3, 3].
+    pred_tracks (torch.Tensor): The predicted tracks tensor of shape [batch_size, num_tracks, 2].
+    extra_params (torch.Tensor, optional): Distortion parameters of shape BxN, where N can be 1, 2, or 4.
+    Returns:
+    torch.Tensor: Normalized tracks tensor.
+    """
+
+    # We don't want to do intrinsics_inv = torch.inverse(intrinsics) here
+    # otherwise we can use something like
+    #     tracks_normalized_homo = torch.bmm(pred_tracks_homo, intrinsics_inv.transpose(1, 2))
+
+    principal_point = intrinsics[:, [0, 1], [2, 2]].unsqueeze(-2)
+    focal_length = intrinsics[:, [0, 1], [0, 1]].unsqueeze(-2)
+    tracks_normalized = (pred_tracks - principal_point) / focal_length
+
+    if extra_params is not None:
+        # Apply iterative undistortion
+        try:
+            tracks_normalized = iterative_undistortion(
+                extra_params, tracks_normalized
+            )
+        except:
+            tracks_normalized = single_undistortion(
+                extra_params, tracks_normalized
+            )
+
+    return tracks_normalized

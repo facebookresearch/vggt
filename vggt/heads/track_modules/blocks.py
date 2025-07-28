@@ -56,12 +56,7 @@ class EfficientUpdateFormer(nn.Module):
 
         self.time_blocks = nn.ModuleList(
             [
-                AttnBlock(
-                    hidden_size,
-                    num_heads,
-                    mlp_ratio=mlp_ratio,
-                    attn_class=nn.MultiheadAttention,
-                )
+                AttnBlock(hidden_size, num_heads, mlp_ratio=mlp_ratio, attn_class=nn.MultiheadAttention)
                 for _ in range(time_depth)
             ]
         )
@@ -69,12 +64,7 @@ class EfficientUpdateFormer(nn.Module):
         if add_space_attn:
             self.space_virtual_blocks = nn.ModuleList(
                 [
-                    AttnBlock(
-                        hidden_size,
-                        num_heads,
-                        mlp_ratio=mlp_ratio,
-                        attn_class=nn.MultiheadAttention,
-                    )
+                    AttnBlock(hidden_size, num_heads, mlp_ratio=mlp_ratio, attn_class=nn.MultiheadAttention)
                     for _ in range(space_depth)
                 ]
             )

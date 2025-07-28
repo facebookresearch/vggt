@@ -67,11 +67,7 @@ class Block(nn.Module):
         self.norm2 = norm_layer(dim)
         mlp_hidden_dim = int(dim * mlp_ratio)
         self.mlp = ffn_layer(
-            in_features=dim,
-            hidden_features=mlp_hidden_dim,
-            act_layer=act_layer,
-            drop=drop,
-            bias=ffn_bias,
+            in_features=dim, hidden_features=mlp_hidden_dim, act_layer=act_layer, drop=drop, bias=ffn_bias
         )
         self.ls2 = LayerScale(dim, init_values=init_values) if init_values else nn.Identity()
         self.drop_path2 = DropPath(drop_path) if drop_path > 0.0 else nn.Identity()
@@ -88,15 +84,10 @@ class Block(nn.Module):
         if self.training and self.sample_drop_ratio > 0.1:
             # the overhead is compensated only for a drop path rate larger than 0.1
             x = drop_add_residual_stochastic_depth(
-                x,
-                pos=pos,
-                residual_func=attn_residual_func,
-                sample_drop_ratio=self.sample_drop_ratio,
+                x, pos=pos, residual_func=attn_residual_func, sample_drop_ratio=self.sample_drop_ratio
             )
             x = drop_add_residual_stochastic_depth(
-                x,
-                residual_func=ffn_residual_func,
-                sample_drop_ratio=self.sample_drop_ratio,
+                x, residual_func=ffn_residual_func, sample_drop_ratio=self.sample_drop_ratio
             )
         elif self.training and self.sample_drop_ratio > 0.0:
             x = x + self.drop_path1(attn_residual_func(x, pos=pos))
@@ -108,10 +99,7 @@ class Block(nn.Module):
 
 
 def drop_add_residual_stochastic_depth(
-    x: Tensor,
-    residual_func: Callable[[Tensor], Tensor],
-    sample_drop_ratio: float = 0.0,
-    pos=None,
+    x: Tensor, residual_func: Callable[[Tensor], Tensor], sample_drop_ratio: float = 0.0, pos=None
 ) -> Tensor:
     # 1) extract subset using permutation
     b, n, d = x.shape
@@ -226,13 +214,13 @@ class NestedTensorBlock(Block):
                 x_list,
                 residual_func=attn_residual_func,
                 sample_drop_ratio=self.sample_drop_ratio,
-                scaling_vector=self.ls1.gamma if isinstance(self.ls1, LayerScale) else None,
+                scaling_vector=(self.ls1.gamma if isinstance(self.ls1, LayerScale) else None),
             )
             x_list = drop_add_residual_stochastic_depth_list(
                 x_list,
                 residual_func=ffn_residual_func,
                 sample_drop_ratio=self.sample_drop_ratio,
-                scaling_vector=self.ls2.gamma if isinstance(self.ls1, LayerScale) else None,
+                scaling_vector=(self.ls2.gamma if isinstance(self.ls1, LayerScale) else None),
             )
             return x_list
         else:

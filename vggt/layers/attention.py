@@ -58,12 +58,7 @@ class Attention(nn.Module):
             k = self.rope(k, pos)
 
         if self.fused_attn:
-            x = F.scaled_dot_product_attention(
-                q,
-                k,
-                v,
-                dropout_p=self.attn_drop.p if self.training else 0.0,
-            )
+            x = F.scaled_dot_product_attention(q, k, v, dropout_p=self.attn_drop.p if self.training else 0.0)
         else:
             q = q * self.scale
             attn = q @ k.transpose(-2, -1)

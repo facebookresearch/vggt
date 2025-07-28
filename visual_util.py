@@ -215,12 +215,7 @@ def predictions_to_glb(
     return scene_3d
 
 
-def integrate_camera_into_scene(
-    scene: trimesh.Scene,
-    transform: np.ndarray,
-    face_colors: tuple,
-    scene_scale: float,
-):
+def integrate_camera_into_scene(scene: trimesh.Scene, transform: np.ndarray, face_colors: tuple, scene_scale: float):
     """
     Integrates a fake camera mesh into the 3D scene.
 

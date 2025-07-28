@@ -36,10 +36,7 @@ def get_2d_sincos_pos_embed(embed_dim: int, grid_size: Union[int, Tuple[int, int
     grid = grid.reshape([2, 1, grid_size_h, grid_size_w])
     pos_embed = get_2d_sincos_pos_embed_from_grid(embed_dim, grid)
     if return_grid:
-        return (
-            pos_embed.reshape(1, grid_size_h, grid_size_w, -1).permute(0, 3, 1, 2),
-            grid,
-        )
+        return (pos_embed.reshape(1, grid_size_h, grid_size_w, -1).permute(0, 3, 1, 2), grid)
     return pos_embed.reshape(1, grid_size_h, grid_size_w, -1).permute(0, 3, 1, 2)
 
 

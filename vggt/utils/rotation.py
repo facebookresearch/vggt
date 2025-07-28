@@ -63,13 +63,7 @@ def mat_to_quat(matrix: torch.Tensor) -> torch.Tensor:
 
     q_abs = _sqrt_positive_part(
         torch.stack(
-            [
-                1.0 + m00 + m11 + m22,
-                1.0 + m00 - m11 - m22,
-                1.0 - m00 + m11 - m22,
-                1.0 - m00 - m11 + m22,
-            ],
-            dim=-1,
+            [1.0 + m00 + m11 + m22, 1.0 + m00 - m11 - m22, 1.0 - m00 + m11 - m22, 1.0 - m00 - m11 + m22], dim=-1
         )
     )
 
