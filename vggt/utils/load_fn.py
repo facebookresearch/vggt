@@ -121,8 +121,22 @@ def load_and_preprocess_images(image_path_list, mode="crop"):
           and the smaller dimension is padded to reach a square shape (518x518)
         - Dimensions are adjusted to be divisible by 14 for compatibility with model requirements
     """
+    non_preprocessed_imgs = load_images(image_path_list)
+    images = preprocess_images(non_preprocessed_imgs, mode)
+    return images
+
+
+def load_images(image_path_list):
+    non_preprocessed_imgs = [
+        Image.open(image_path)
+        for image_path in image_path_list
+    ]
+    return non_preprocessed_imgs
+
+
+def preprocess_images(image_list, mode="crop"):
     # Check for empty list
-    if len(image_path_list) == 0:
+    if len(image_list) == 0:
         raise ValueError("At least 1 image is required")
 
     # Validate mode
@@ -135,10 +149,7 @@ def load_and_preprocess_images(image_path_list, mode="crop"):
     target_size = 518
 
     # First process all images and collect their shapes
-    for image_path in image_path_list:
-        # Open image
-        img = Image.open(image_path)
-
+    for img in image_list:
         # If there's an alpha channel, blend onto white background:
         if img.mode == "RGBA":
             # Create white background
@@ -222,7 +233,7 @@ def load_and_preprocess_images(image_path_list, mode="crop"):
     images = torch.stack(images)  # concatenate images
 
     # Ensure correct shape when single image
-    if len(image_path_list) == 1:
+    if len(image_list) == 1:
         # Verify shape is (1, C, H, W)
         if images.dim() == 3:
             images = images.unsqueeze(0)
