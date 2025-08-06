@@ -247,15 +247,29 @@ def batch_np_matrix_to_pycolmap_wo_track(
 
             # add camera
             reconstruction.add_camera(camera)
-
-        # set image
         cam_from_world = pycolmap.Rigid3d(
             pycolmap.Rotation3d(extrinsics[fidx][:3, :3]), extrinsics[fidx][:3, 3]
         )  # Rot and Trans
+        # set rig
+        rig = pycolmap.Rig()
+        rig.rig_id = fidx + 1
+        sensor_t = pycolmap.sensor_t()
+        sensor_t.type = pycolmap.SensorType.CAMERA
+        sensor_t.id = camera.camera_id
+        rig.add_ref_sensor(sensor_t)
+        reconstruction.add_rig(rig)
 
+        # set frame
+        frame = pycolmap.Frame()
+        frame.frame_id = fidx + 1
+        frame.rig_id = rig.rig_id
+        frame.rig = reconstruction.rig(rig.rig_id)
+        frame.set_cam_from_world(camera_id=camera.camera_id, cam_from_world=cam_from_world)
+        reconstruction.add_frame(frame)
+
+        # set image
         image = pycolmap.Image(
-            id=fidx + 1, name=f"image_{fidx + 1}", camera_id=camera.camera_id, cam_from_world=cam_from_world
-        )
+            image_id=fidx + 1, name=f"image_{fidx + 1}", camera_id=camera.camera_id, frame_id=frame.frame_id)
 
         points2D_list = []
 
@@ -276,16 +290,21 @@ def batch_np_matrix_to_pycolmap_wo_track(
             point2D_idx += 1
 
         assert point2D_idx == len(points2D_list)
-
+        print(f"frame {fidx + 1} has {point2D_idx} points")
+        print(f"frame {fidx + 1} has {len(points2D_list)} points")
         try:
-            image.points2D = pycolmap.ListPoint2D(points2D_list)
-            image.registered = True
-        except:
+            image.points2D = points2D_list
+
+        except Exception as e:
             print(f"frame {fidx + 1} does not have any points")
-            image.registered = False
+            print(e)
+
 
         # add image
+        print(image.cam_from_world)
         reconstruction.add_image(image)
+    print(reconstruction.num_images)
+    print(reconstruction.images)
 
     return reconstruction
 
