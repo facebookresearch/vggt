@@ -376,6 +376,13 @@ def main():
         if isinstance(predictions[key], torch.Tensor):
             predictions[key] = predictions[key].cpu().numpy().squeeze(0)  # remove batch dimension and convert to numpy
 
+    # Free GPU memory after moving tensors to CPU
+    try:
+        del model, images
+        torch.cuda.empty_cache()
+    except NameError:
+        pass
+
     if args.use_point_map:
         print("Visualizing 3D points from point map")
     else:
