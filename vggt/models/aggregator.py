@@ -204,8 +204,11 @@ class Aggregator(nn.Module):
         images = images.view(B * S, C_in, H, W)
         patch_tokens = self.patch_embed(images)
 
+        dtype = torch.bfloat16 if torch.cuda.get_device_capability()[0] >= 8 else torch.float16
         if isinstance(patch_tokens, dict):
-            patch_tokens = patch_tokens["x_norm_patchtokens"]
+            patch_tokens = patch_tokens["x_norm_patchtokens"].to(dtype)
+        else:
+            patch_tokens = patch_tokens.to(dtype)
 
         _, P, C = patch_tokens.shape
 
