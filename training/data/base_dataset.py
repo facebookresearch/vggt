@@ -72,12 +72,13 @@ class BaseDataset(Dataset):
             seq_index=seq_index, img_per_seq=img_per_seq, aspect_ratio=aspect_ratio
         )
 
-    def get_data(self, seq_index=None, seq_name=None, ids=None, aspect_ratio=1.0):
+    def get_data(self, seq_index=None, img_per_seq=None, seq_name=None, ids=None, aspect_ratio=1.0):
         """
         Abstract method to retrieve data for a given sequence.
 
         Args:
             seq_index (int, optional): Index of the sequence
+            img_per_seq (int, optional): Number of images per sequence
             seq_name (str, optional): Name of the sequence
             ids (list, optional): List of frame IDs
             aspect_ratio (float, optional): Target aspect ratio.
