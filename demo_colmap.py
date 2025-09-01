@@ -110,12 +110,12 @@ def demo_fn(args):
     print(f"Using dtype: {dtype}")
 
     # Run VGGT for camera and depth estimation
-    model = VGGT()
+    model = VGGT().to(device)
     _URL = "https://huggingface.co/facebook/VGGT-1B/resolve/main/model.pt"
-    model.load_state_dict(torch.hub.load_state_dict_from_url(_URL))
+    state_dict = torch.hub.load_state_dict_from_url(_URL, map_location=device)
+    model.load_state_dict(state_dict)
     model.eval()
-    model = model.to(device)
-    print(f"Model loaded")
+    print(f"Model loaded to {device}")
 
     # Get image paths and preprocess them
     image_dir = os.path.join(args.scene_dir, "images")

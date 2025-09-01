@@ -29,13 +29,12 @@ device = "cuda" if torch.cuda.is_available() else "cpu"
 print("Initializing and loading VGGT model...")
 # model = VGGT.from_pretrained("facebook/VGGT-1B")  # another way to load the model
 
-model = VGGT()
+model = VGGT().to(device)
 _URL = "https://huggingface.co/facebook/VGGT-1B/resolve/main/model.pt"
-model.load_state_dict(torch.hub.load_state_dict_from_url(_URL))
-
-
+state_dict = torch.hub.load_state_dict_from_url(_URL, map_location=device)
+model.load_state_dict(state_dict)
 model.eval()
-model = model.to(device)
+print(f"Model loaded to {device}")
 
 
 # -------------------------------------------------------------------------
