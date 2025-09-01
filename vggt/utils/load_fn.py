@@ -5,7 +5,7 @@
 # LICENSE file in the root directory of this source tree.
 
 import torch
-from PIL import Image
+from PIL import Image, ImageOps
 from torchvision import transforms as TF
 import numpy as np
 
@@ -39,6 +39,7 @@ def load_and_preprocess_images_square(image_path_list, target_size=1024):
     for image_path in image_path_list:
         # Open image
         img = Image.open(image_path)
+        img = ImageOps.exif_transpose(img)
 
         # If there's an alpha channel, blend onto white background
         if img.mode == "RGBA":
@@ -138,6 +139,7 @@ def load_and_preprocess_images(image_path_list, mode="crop"):
     for image_path in image_path_list:
         # Open image
         img = Image.open(image_path)
+        img = ImageOps.exif_transpose(img)
 
         # If there's an alpha channel, blend onto white background:
         if img.mode == "RGBA":
