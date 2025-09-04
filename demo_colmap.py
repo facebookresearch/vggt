@@ -59,6 +59,8 @@ def parse_args():
     parser.add_argument(
         "--conf_thres_value", type=float, default=5.0, help="Confidence threshold value for depth filtering (wo BA)"
     )
+    parser.add_argument("--remove_padding", action="store_true", default=False, help="Remove padding in points")
+
     return parser.parse_args()
 
 
@@ -209,7 +211,23 @@ def demo_fn(args):
         # (S, H, W, 3), with x, y coordinates and frame indices
         points_xyf = create_pixel_coordinate_grid(num_frames, height, width)
 
+        width_start = original_coords[:, 0] * vggt_fixed_resolution / img_load_resolution
+        height_start = original_coords[:, 1] * vggt_fixed_resolution / img_load_resolution
+        width_end = original_coords[:, 2] * vggt_fixed_resolution / img_load_resolution
+        height_end = original_coords[:, 3] * vggt_fixed_resolution / img_load_resolution
+
+        # create a padding mask for each image
+        padding_mask = np.ones((num_frames, height, width), dtype=bool)
+        if args.remove_padding:
+            for i in range(num_frames):
+                padding_mask[i, int(height_start[i] + 0.5):int(height_end[i] + 0.5),
+                int(width_start[i] + 0.5):int(width_end[i] + 0.5)] = False
+            # inverse the mask to select valid points
+            padding_mask = np.logical_not(padding_mask)
+
         conf_mask = depth_conf >= conf_thres_value
+        conf_mask = np.logical_and(conf_mask, padding_mask)
+
         # at most writing 100000 3d points to colmap reconstruction object
         conf_mask = randomly_limit_trues(conf_mask, max_points_for_colmap)
 
