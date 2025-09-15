@@ -15,7 +15,7 @@ from datetime import datetime
 import glob
 import gc
 import time
-import json  # <-- [ADDED] for writing cameras.json
+import json  
 
 
 sys.path.append("vggt/")
