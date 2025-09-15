@@ -1,8 +1,0 @@
-{
-  "load_preprocess_s": 1.8166,
-  "inference_s": 0.7113,
-  "pose_decode_s": 0.0166,
-  "camera_extract_s": 0.0,
-  "num_frames": 6,
-  "total_s": 2.9715
-}

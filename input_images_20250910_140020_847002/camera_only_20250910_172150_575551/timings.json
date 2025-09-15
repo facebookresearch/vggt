@@ -1,0 +1,12 @@
+{
+  "load_preprocess_s": 1.2513,
+  "inference_s": 0.5233,
+  "proc_shape_hw": [
+    238,
+    322
+  ],
+  "pose_decode_s": 0.017,
+  "camera_extract_s": 0.0,
+  "num_frames": 6,
+  "total_s": 2.0661
+}

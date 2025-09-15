@@ -1,14 +1,11 @@
-
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+# All rights reserved.
 
 from __future__ import annotations
 import os
-import io
-import cv2
 import json
 import glob
 import time
-import gc
-import shutil
 import argparse
 from collections import deque
 from datetime import datetime
@@ -16,8 +13,9 @@ from typing import List, Tuple, Optional, Deque
 
 import numpy as np
 import torch
+import torch.nn.functional as F
+from PIL import Image  # for saving processed inputs
 
-# Perf knobs
 torch.set_float32_matmul_precision("high")
 try:
     torch.backends.cuda.matmul.allow_tf32 = True
@@ -25,7 +23,6 @@ try:
 except Exception:
     pass
 
-# Prefer mem-efficient attention on Windows where flash SDP often isn't available
 try:
     from torch.backends.cuda import sdp_kernel
     sdp_kernel(enable_flash=False, enable_math=False, enable_mem_efficient=True)
@@ -36,13 +33,13 @@ except Exception:
 import sys
 sys.path.append("vggt/")
 from vggt.models.vggt import VGGT
-from vggt.utils.load_fn import load_and_preprocess_images_square
+from vggt.utils.load_fn import load_and_preprocess_images   # AR-preserving like the demo
 from vggt.utils.pose_enc import pose_encoding_to_extri_intri
 
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
-# ----------------------------- helpers -----------------------------
 
+# ----------------------------- helpers -----------------------------
 def _mat_to_euler_xyz_deg(R: np.ndarray):
     sy = float(np.sqrt(R[0, 0] * R[0, 0] + R[1, 0] * R[1, 0]))
     singular = sy < 1e-6
@@ -58,7 +55,7 @@ def _mat_to_euler_xyz_deg(R: np.ndarray):
 
 
 def _cams_from_extri_intri(E: np.ndarray, K: np.ndarray, names: List[str]):
-    # Normalize shapes to (S, 3, 4) and (S, 3, 3)
+    #normalize to (S,3,4) and (S,3,3)
     if E.ndim == 4 and E.shape[0] == 1:
         E = E[0]
     if K.ndim == 4 and K.shape[0] == 1:
@@ -71,15 +68,11 @@ def _cams_from_extri_intri(E: np.ndarray, K: np.ndarray, names: List[str]):
     cams = []
     S = E.shape[0]
     for i in range(S):
-        Ei = E[i]  # (3,4)
-        H = np.eye(4, dtype=Ei.dtype)
-        H[:3, :4] = Ei
-
-        # VGGT extrinsic is camera-from-world; invert to world-from-camera
+        Ei = E[i]  # (3,4) matrix
+        H = np.eye(4, dtype=Ei.dtype); H[:3, :4] = Ei
         Twc = np.linalg.inv(H)
         Rwc, t = Twc[:3, :3], Twc[:3, 3]
         roll, pitch, yaw = _mat_to_euler_xyz_deg(Rwc)
-
         fx = float(K[i][0, 0]); fy = float(K[i][1, 1])
         cx = float(K[i][0, 2]); cy = float(K[i][1, 2])
         cams.append({
@@ -91,21 +84,27 @@ def _cams_from_extri_intri(E: np.ndarray, K: np.ndarray, names: List[str]):
         })
     return cams
 
-# --------------------------- main class ----------------------------
 
+# --------------------------- main class ----------------------------
 class CameraOnlyVGGT:
     def __init__(self, size: int = 384, window: int = 4, dtype: Optional[torch.dtype] = None, compile_model: bool = False):
         """
-            size: square short-side (pixels) for preprocessing (requested; patch-aligned internally)
-            window: number of most-recent frames to feed per inference
-            dtype: torch.bfloat16 (Ada+), torch.float16, or None to auto-pick
-            compile_model: optional torch.compile; default False (Windows Dynamo can be flaky)
+        Args:
+          size: **long-side cap** in pixels (AR preserved). If images are smaller, no upscaling.
+                For exact demo parity, pass a large cap (e.g., --size 4096) so we don't downscale.
+          window: number of most-recent frames to feed per inference
+          dtype: torch.bfloat16 (Ada+), torch.float16, or None to auto-pick
+          compile_model: optional torch.compile; default False (Windows Dynamo can be flaky)
         """
         self.size = int(size)
         self.window = int(window)
         self.queue: Deque[str] = deque(maxlen=self.window)
 
-        # camera head only
+        #cache of last processed inputs for saving
+        self._last_images_cpu: Optional[torch.Tensor] = None  #(S,3,H,W) float32 [0,1] on CPU
+        self._last_names: List[str] = []
+
+        #camera head only
         self.model = VGGT(enable_camera=True, enable_point=False, enable_depth=False, enable_track=False)
         _URL = "https://huggingface.co/facebook/VGGT-1B/resolve/main/model.pt"
         sd = torch.hub.load_state_dict_from_url(_URL, map_location="cpu")
@@ -122,24 +121,23 @@ class CameraOnlyVGGT:
         else:
             self.dtype = dtype
 
-        # optional compile (disabled by default)
         if compile_model:
             try:
                 self.model = torch.compile(self.model, mode="reduce-overhead", fullgraph=True)
             except Exception as e:
                 print(f"[VGGT] torch.compile disabled (error: {e})")
 
-        # warmup with patch-size–aligned dummy to avoid internal asserts
+        #lightweight warmup
         if DEVICE == "cuda":
             patch_h, patch_w = self._get_patch_hw()
-            H = self._align_to_patch(self.size, patch_h)
-            W = self._align_to_patch(self.size, patch_w)
+            H = self._align_to_patch(min(max(self.size, patch_h), 2 * self.size), patch_h)
+            W = self._align_to_patch(min(max(self.size, patch_w), 2 * self.size), patch_w)
             dummy = torch.zeros(2, 3, H, W, device=DEVICE)
-            with torch.no_grad(), torch.cuda.amp.autocast(enabled=(DEVICE=="cuda"), dtype=self.dtype):
+            with torch.no_grad(), torch.cuda.amp.autocast(enabled=(DEVICE == "cuda"), dtype=self.dtype):
                 _ = self.model(dummy)
             torch.cuda.synchronize()
 
-    # ---- internal: model patch + size alignment ----
+    # ---- internal: model patch helpers ----
     def _get_patch_hw(self) -> Tuple[int, int]:
         try:
             ps = getattr(self.model.aggregator.patch_embed, "patch_size", (16, 16))
@@ -150,10 +148,10 @@ class CameraOnlyVGGT:
         return int(ps), int(ps)
 
     @staticmethod
-    def _align_to_patch(size: int, patch: int) -> int:
+    def _align_to_patch(n: int, patch: int) -> int:
         if patch <= 0:
-            return int(size)
-        return max(patch, int(round(size / patch) * patch))
+            return int(n)
+        return max(patch, (int(round(n / patch)) * patch))
 
     # ---------------- live-time helpers ----------------
     def push_path(self, img_path: str):
@@ -161,19 +159,25 @@ class CameraOnlyVGGT:
 
     def _stack(self) -> Tuple[torch.Tensor, List[str]]:
         names = list(self.queue)
-        if len(names) == 0:
+        if not names:
             raise ValueError("No frames in queue")
 
-        # align requested size to the model's patch size to avoid assert
-        patch_h, patch_w = self._get_patch_hw()
-        tgt_h = self._align_to_patch(self.size, patch_h)
-        tgt_w = self._align_to_patch(self.size, patch_w)
-        target_size = self._align_to_patch(int(round((tgt_h + tgt_w) * 0.5)), max(patch_h, patch_w))
+        out = load_and_preprocess_images(names)
+        imgs = out[0] if isinstance(out, (tuple, list)) else out  # (S,3,H,W)
 
-        out = load_and_preprocess_images_square(names, target_size=target_size)
-        imgs = out[0] if isinstance(out, (tuple, list)) else out
-        imgs = imgs.to(DEVICE)
-        return imgs, names
+        #cap long side
+        H, W = imgs.shape[-2:]
+        patch_h, patch_w = self._get_patch_hw()
+
+        if max(H, W) > self.size:
+            scale = self.size / float(max(H, W))
+            H2 = max(patch_h, int(round(H * scale)))
+            W2 = max(patch_w, int(round(W * scale)))
+            H2 = self._align_to_patch(H2, patch_h)
+            W2 = self._align_to_patch(W2, patch_w)
+            imgs = F.interpolate(imgs, size=(H2, W2), mode="bilinear", align_corners=False)
+
+        return imgs.to(DEVICE), names
 
     @torch.no_grad()
     def infer_latest(self) -> dict:
@@ -188,17 +192,22 @@ class CameraOnlyVGGT:
         images, names = self._stack()
         timings["load_preprocess_s"] = round(time.time() - t_load0, 4)
 
+        #cache exactly what we compute on
+        self._last_images_cpu = images.detach().to("cpu", dtype=torch.float32).clamp_(0.0, 1.0)
+        self._last_names = list(names)
+
         t_inf0 = time.time()
-        with torch.cuda.amp.autocast(enabled=(DEVICE=="cuda"), dtype=self.dtype):
+        with torch.cuda.amp.autocast(enabled=(DEVICE == "cuda"), dtype=self.dtype):
             preds = self.model(images)
         timings["inference_s"] = round(time.time() - t_inf0, 4)
 
         H, W = images.shape[-2:]
+        timings["proc_shape_hw"] = [int(H), int(W)]  #record processed size
+
         t_pose0 = time.time()
         extri, intri = pose_encoding_to_extri_intri(preds["pose_enc"], (H, W))
         timings["pose_decode_s"] = round(time.time() - t_pose0, 4)
 
-        # Squeeze a leading batch dimension if present (common: (1,S,3,4)/(1,S,3,3))
         extri_np = extri.detach().cpu().numpy()
         intri_np = intri.detach().cpu().numpy()
         if extri_np.ndim == 4 and extri_np.shape[0] == 1:
@@ -215,8 +224,46 @@ class CameraOnlyVGGT:
         latest = cams[-1]
         return {"cameras": cams, "latest": latest, "timings": timings}
 
-# --------------------------- CLI / UI ------------------------------
+    #---------------- saving helpers ----------------
+    def save_processed_images(self, out_dir: str, format: str = "jpg", quality: int = 90) -> List[str]:
+        """
+        Save the *processed* inputs 
+        that were used for the most recent inference.
 
+        Args:
+          out_dir: target directory, which is created if needed
+          format: "jpg" or "png"
+        Returns:
+          List of saved file paths in order.
+        """
+        if self._last_images_cpu is None or not self._last_names:
+            raise RuntimeError("No cached inputs to save; run infer_latest() first.")
+
+        os.makedirs(out_dir, exist_ok=True)
+        saved = []
+        S, _, H, W = self._last_images_cpu.shape
+
+        for i in range(S):
+            #to uint8 HxWx3
+            arr = (self._last_images_cpu[i].permute(1, 2, 0).numpy() * 255.0)
+            arr = np.clip(np.rint(arr), 0, 255).astype(np.uint8)
+            img = Image.fromarray(arr)
+
+            stem = os.path.splitext(os.path.basename(self._last_names[i]))[0]
+            ext = ".jpg" if format.lower() == "jpg" else ".png"
+            path = os.path.join(out_dir, f"{i:04d}_{stem}{ext}")
+
+            if format.lower() == "jpg":
+                img.save(path, format="JPEG", quality=int(quality), optimize=True, subsampling=1)
+            else:
+                img.save(path, format="PNG", optimize=True)
+
+            saved.append(path)
+
+        return saved
+
+
+# --------------------------- CLI / UI ------------------------------
 def run_folder(images_dir: str, size: int, window: int, cap: int = 0):
     all_imgs = sorted(glob.glob(os.path.join(images_dir, "*")))
     if cap and cap > 0:
@@ -224,25 +271,37 @@ def run_folder(images_dir: str, size: int, window: int, cap: int = 0):
     if not all_imgs:
         raise SystemExit(f"No images found in {images_dir}")
 
-    actual_window = len(all_imgs) if window <= 0 or window > len(all_imgs) else window
     engine = CameraOnlyVGGT(size=size, window=window)
 
     for p in all_imgs:
         engine.push_path(p)
     out = engine.infer_latest()
 
-    # Write cameras.json & timings.json in a timestamped folder next to the images
     ts = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
     tgt = os.path.join(os.path.dirname(images_dir.rstrip(os.sep)), f"camera_only_{ts}")
     os.makedirs(tgt, exist_ok=True)
+
+    #saving the JSONs
     with open(os.path.join(tgt, "cameras.json"), "w") as f:
         json.dump(out["cameras"], f, indent=2)
     with open(os.path.join(tgt, "timings.json"), "w") as f:
         json.dump(out["timings"], f, indent=2)
 
+    #save the exact processed inputs used for compute
+    inputs_dir = os.path.join(tgt, "compressed_inputs")
+    saved_paths = engine.save_processed_images(inputs_dir, format="jpg", quality=90)
+
+    #optional mapping for convenience
+    mapping = [
+        {"original": os.path.abspath(p), "saved": os.path.abspath(sp)}
+        for p, sp in zip(all_imgs[-len(saved_paths):], saved_paths)
+    ]
+    with open(os.path.join(tgt, "inputs_mapping.json"), "w") as f:
+        json.dump(mapping, f, indent=2)
+
     print("Latest frame camera:", json.dumps(out["latest"], indent=2))
     print("Timings:", json.dumps(out["timings"], indent=2))
-
+    print(f"[saved] processed inputs → {inputs_dir}")
 
 def launch_ui(size: int, window: int):
     import gradio as gr
@@ -252,23 +311,38 @@ def launch_ui(size: int, window: int):
         for f in files:
             nonlocal_engine.push_path(f.name if hasattr(f, 'name') else f)
         res = nonlocal_engine.infer_latest()
+
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+        out_root = os.path.join(os.getcwd(), f"camera_only_ui_{ts}")
+        os.makedirs(out_root, exist_ok=True)
+
+        #saving the camera information along with the timings
+        cams_path = os.path.join(out_root, "cameras.json")
+        with open(cams_path, "w") as f:
+            json.dump(res["cameras"], f, indent=2)
+        with open(os.path.join(out_root, "timings.json"), "w") as f:
+            json.dump(res["timings"], f, indent=2)
+
+        #save processed inputs used
+        inputs_dir = os.path.join(out_root, "compressed_inputs")
+        nonlocal_engine.save_processed_images(inputs_dir, format="jpg", quality=90)
+
         log = (
             f"num_frames={res['timings']['num_frames']}, "
+            f"proc_hw={res['timings'].get('proc_shape_hw')}, "
             f"load={res['timings']['load_preprocess_s']}s, "
             f"infer={res['timings']['inference_s']}s, "
             f"pose={res['timings']['pose_decode_s']}s, "
-            f"total={res['timings']['total_s']}s "
-            + json.dumps(res['latest'], indent=2)
+            f"total={res['timings']['total_s']}s\n"
+            f"latest={json.dumps(res['latest'], indent=2)}\n"
+            f"saved processed inputs → {inputs_dir}"
         )
-        cams_path = os.path.join(os.getcwd(), "cameras.json")
-        with open(cams_path, "w") as f:
-            json.dump(res["cameras"], f, indent=2)
         return log, cams_path
 
     nonlocal_engine = CameraOnlyVGGT(size=size, window=window)
 
     with gr.Blocks() as demo:
-        gr.Markdown("# VGGT — Camera Only (no GLB)")
+        gr.Markdown("no glb computations here, just the camera information")
         files = gr.File(file_count="multiple", label="Upload images (ordered)")
         log = gr.Markdown("Upload a few frames; we'll run a single pass on the window.")
         cams_file = gr.File(label="Download cameras.json")
@@ -279,8 +353,9 @@ def launch_ui(size: int, window: int):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--images_dir", type=str, default=None, help="Folder of images for a quick test")
-    parser.add_argument("--size", type=int, default=384, help="Square preprocess size (requested; will be patch-aligned)")
-    parser.add_argument("--window", type=int, default=4, help="Frames per inference (keep tiny for latency)")
+    parser.add_argument("--size", type=int, default=384,
+                        help="**Long-side cap** (px). AR preserved; set a large value for demo parity.")
+    parser.add_argument("--window", type=int, default=4, help="Frames per inference (keep small for latency)")
     parser.add_argument("--cap", type=int, default=0, help="Use only first N images (0 = all)")
     parser.add_argument("--ui", action="store_true", help="Launch a minimal Gradio UI for manual timing")
     args = parser.parse_args()
