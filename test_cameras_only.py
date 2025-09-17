@@ -9,7 +9,7 @@ import time
 import argparse
 from collections import deque
 from datetime import datetime
-from typing import List, Tuple, Optional, Deque
+from typing import List, Tuple, Optional, Deque, Dict
 
 import numpy as np
 import torch
@@ -55,7 +55,7 @@ def _mat_to_euler_xyz_deg(R: np.ndarray):
 
 
 def _cams_from_extri_intri(E: np.ndarray, K: np.ndarray, names: List[str]):
-    #normalize to (S,3,4) and (S,3,3)
+    # normalize to (S,3,4) and (S,3,3)
     if E.ndim == 4 and E.shape[0] == 1:
         E = E[0]
     if K.ndim == 4 and K.shape[0] == 1:
@@ -68,9 +68,9 @@ def _cams_from_extri_intri(E: np.ndarray, K: np.ndarray, names: List[str]):
     cams = []
     S = E.shape[0]
     for i in range(S):
-        Ei = E[i]  # (3,4) matrix
+        Ei = E[i]  # (3,4) matrix (assumed world->camera)
         H = np.eye(4, dtype=Ei.dtype); H[:3, :4] = Ei
-        Twc = np.linalg.inv(H)
+        Twc = np.linalg.inv(H)  # camera->world
         Rwc, t = Twc[:3, :3], Twc[:3, 3]
         roll, pitch, yaw = _mat_to_euler_xyz_deg(Rwc)
         fx = float(K[i][0, 0]); fy = float(K[i][1, 1])
@@ -100,11 +100,11 @@ class CameraOnlyVGGT:
         self.window = int(window)
         self.queue: Deque[str] = deque(maxlen=self.window)
 
-        #cache of last processed inputs for saving
-        self._last_images_cpu: Optional[torch.Tensor] = None  #(S,3,H,W) float32 [0,1] on CPU
+        # cache of last processed inputs for saving
+        self._last_images_cpu: Optional[torch.Tensor] = None  # (S,3,H,W) float32 [0,1] on CPU
         self._last_names: List[str] = []
 
-        #camera head only
+        # camera head only
         self.model = VGGT(enable_camera=True, enable_point=False, enable_depth=False, enable_track=False)
         _URL = "https://huggingface.co/facebook/VGGT-1B/resolve/main/model.pt"
         sd = torch.hub.load_state_dict_from_url(_URL, map_location="cpu")
@@ -127,7 +127,7 @@ class CameraOnlyVGGT:
             except Exception as e:
                 print(f"[VGGT] torch.compile disabled (error: {e})")
 
-        #lightweight warmup
+        # lightweight warmup
         if DEVICE == "cuda":
             patch_h, patch_w = self._get_patch_hw()
             H = self._align_to_patch(min(max(self.size, patch_h), 2 * self.size), patch_h)
@@ -140,7 +140,8 @@ class CameraOnlyVGGT:
     # ---- internal: model patch helpers ----
     def _get_patch_hw(self) -> Tuple[int, int]:
         try:
-            ps = getattr(self.model.aggregator.patch_embed, "patch_size", (16, 16))
+            ps = getattr(self.model.aggregator, "patch_embed", None)
+            ps = getattr(ps, "patch_size", (16, 16))
         except Exception:
             ps = (16, 16)
         if isinstance(ps, (tuple, list)):
@@ -157,18 +158,14 @@ class CameraOnlyVGGT:
     def push_path(self, img_path: str):
         self.queue.append(img_path)
 
-    def _stack(self) -> Tuple[torch.Tensor, List[str]]:
-        names = list(self.queue)
-        if not names:
-            raise ValueError("No frames in queue")
-
+    def _process_paths_for_model(self, names: List[str]) -> torch.Tensor:
+        """Load + AR-preserve resize exactly like _stack(), but for explicit paths list."""
         out = load_and_preprocess_images(names)
         imgs = out[0] if isinstance(out, (tuple, list)) else out  # (S,3,H,W)
 
-        #cap long side
+        # cap long side
         H, W = imgs.shape[-2:]
         patch_h, patch_w = self._get_patch_hw()
-
         if max(H, W) > self.size:
             scale = self.size / float(max(H, W))
             H2 = max(patch_h, int(round(H * scale)))
@@ -177,6 +174,14 @@ class CameraOnlyVGGT:
             W2 = self._align_to_patch(W2, patch_w)
             imgs = F.interpolate(imgs, size=(H2, W2), mode="bilinear", align_corners=False)
 
+        return imgs
+
+    def _stack(self) -> Tuple[torch.Tensor, List[str]]:
+        names = list(self.queue)
+        if not names:
+            raise ValueError("No frames in queue")
+
+        imgs = self._process_paths_for_model(names)
         return imgs.to(DEVICE), names
 
     @torch.no_grad()
@@ -192,7 +197,7 @@ class CameraOnlyVGGT:
         images, names = self._stack()
         timings["load_preprocess_s"] = round(time.time() - t_load0, 4)
 
-        #cache exactly what we compute on
+        # cache exactly what we compute on
         self._last_images_cpu = images.detach().to("cpu", dtype=torch.float32).clamp_(0.0, 1.0)
         self._last_names = list(names)
 
@@ -202,7 +207,7 @@ class CameraOnlyVGGT:
         timings["inference_s"] = round(time.time() - t_inf0, 4)
 
         H, W = images.shape[-2:]
-        timings["proc_shape_hw"] = [int(H), int(W)]  #record processed size
+        timings["proc_shape_hw"] = [int(H), int(W)]  # record processed size
 
         t_pose0 = time.time()
         extri, intri = pose_encoding_to_extri_intri(preds["pose_enc"], (H, W))
@@ -224,6 +229,96 @@ class CameraOnlyVGGT:
         latest = cams[-1]
         return {"cameras": cams, "latest": latest, "timings": timings}
 
+    # ---------------- NEW: explicit-path inference for fixed-anchor server ----------------
+    @torch.inference_mode()
+    def infer_paths(
+        self,
+        paths: List[str],
+        world_norm_T: Optional[np.ndarray] = None,
+        fix_gauge_once: bool = True,
+    ) -> Dict:
+        """
+        Run camera-only on an explicit batch of image file paths (first is the anchor).
+        Returns poses in a world where the anchor is at the origin (identity) if world_norm_T is None.
+        If world_norm_T is provided, reuse it to keep the world fixed across calls.
+        Output schema matches what test_fixed_window.py expects.
+        """
+        if not paths or len(paths) == 0:
+            raise ValueError("infer_paths: empty path list")
+
+        t_total0 = time.time()
+
+        # 1) Load + preprocess (same path as _stack)
+        t_load0 = time.time()
+        imgs = self._process_paths_for_model(paths).to(DEVICE)
+        H, W = imgs.shape[-2:]
+        t_load = time.time() - t_load0
+
+        # 2) Forward pass (camera-only head)
+        t_fwd0 = time.time()
+        with torch.cuda.amp.autocast(enabled=(DEVICE == "cuda"), dtype=self.dtype):
+            preds = self.model(imgs)
+        t_fwd = time.time() - t_fwd0
+
+        # 3) Decode to extrinsics/intrinsics
+        t_pose0 = time.time()
+        extri_t, intri_t = pose_encoding_to_extri_intri(preds["pose_enc"], (H, W))
+        t_pose = time.time() - t_pose0
+
+        extri = extri_t.detach().cpu().numpy()
+        intri = intri_t.detach().cpu().numpy()
+        # normalize dims
+        if extri.ndim == 4 and extri.shape[0] == 1: extri = extri[0]
+        if intri.ndim == 4 and intri.shape[0] == 1: intri = intri[0]
+
+        # 4) Convert world->camera [R|t] to camera->world 4x4 (Twc) for each frame
+        Twc_list: List[np.ndarray] = []
+        S = extri.shape[0]
+        for i in range(S):
+            Ei = extri[i]  # (3,4)
+            H4 = np.eye(4, dtype=np.float32)
+            H4[:3, :4] = Ei
+            Twc = np.linalg.inv(H4).astype(np.float32)  # camera->world
+            Twc_list.append(Twc)
+
+        # 5) Choose (or reuse) world normalization so that anchor is identity:
+        #    world_norm_T @ Twc_anchor = I  ->  world_norm_T = inv(Twc_anchor)
+        if world_norm_T is None:
+            world_norm_T = np.linalg.inv(Twc_list[0]).astype(np.float32)
+
+        Twc_world = [world_norm_T @ Twc for Twc in Twc_list]
+
+        # 6) Pack per-frame camera dicts (position + euler + c2w)
+        def mat_to_euler_xyz_deg(R: np.ndarray):
+            return _mat_to_euler_xyz_deg(R)
+
+        cams_world: List[Dict] = []
+        for i, Twc in enumerate(Twc_world):
+            p = Twc[:3, 3]
+            R = Twc[:3, :3]
+            roll, pitch, yaw = mat_to_euler_xyz_deg(R)
+            cams_world.append({
+                "frame_path": paths[i],
+                "matrix_c2w": Twc.tolist(),
+                "position_m": {"x": float(p[0]), "y": float(p[1]), "z": float(p[2])},
+                "euler_xyz_deg": {"roll": float(roll), "pitch": float(pitch), "yaw": float(yaw)},
+            })
+
+        timings = {
+            "load_preprocess_s": round(t_load, 4),
+            "inference_s": round(t_fwd, 4),
+            "pose_decode_s": round(t_pose, 4),
+            "proc_shape_hw": [int(H), int(W)],
+            "total_s": round(time.time() - t_total0, 4),
+        }
+
+        return {
+            "timings": timings,
+            "cameras_world": cams_world,
+            # Provide the fixed normalization once so the server can cache it
+            "world_norm_T": world_norm_T.tolist() if fix_gauge_once else None,
+        }
+
     #---------------- saving helpers ----------------
     def save_processed_images(self, out_dir: str, format: str = "jpg", quality: int = 90) -> List[str]:
         """
@@ -244,7 +339,7 @@ class CameraOnlyVGGT:
         S, _, H, W = self._last_images_cpu.shape
 
         for i in range(S):
-            #to uint8 HxWx3
+            # to uint8 HxWx3
             arr = (self._last_images_cpu[i].permute(1, 2, 0).numpy() * 255.0)
             arr = np.clip(np.rint(arr), 0, 255).astype(np.uint8)
             img = Image.fromarray(arr)
@@ -281,17 +376,17 @@ def run_folder(images_dir: str, size: int, window: int, cap: int = 0):
     tgt = os.path.join(os.path.dirname(images_dir.rstrip(os.sep)), f"camera_only_{ts}")
     os.makedirs(tgt, exist_ok=True)
 
-    #saving the JSONs
+    # saving the JSONs
     with open(os.path.join(tgt, "cameras.json"), "w") as f:
         json.dump(out["cameras"], f, indent=2)
     with open(os.path.join(tgt, "timings.json"), "w") as f:
         json.dump(out["timings"], f, indent=2)
 
-    #save the exact processed inputs used for compute
+    # save the exact processed inputs used for compute
     inputs_dir = os.path.join(tgt, "compressed_inputs")
     saved_paths = engine.save_processed_images(inputs_dir, format="jpg", quality=90)
 
-    #optional mapping for convenience
+    # optional mapping for convenience
     mapping = [
         {"original": os.path.abspath(p), "saved": os.path.abspath(sp)}
         for p, sp in zip(all_imgs[-len(saved_paths):], saved_paths)
@@ -316,14 +411,14 @@ def launch_ui(size: int, window: int):
         out_root = os.path.join(os.getcwd(), f"camera_only_ui_{ts}")
         os.makedirs(out_root, exist_ok=True)
 
-        #saving the camera information along with the timings
+        # saving the camera information along with the timings
         cams_path = os.path.join(out_root, "cameras.json")
         with open(cams_path, "w") as f:
             json.dump(res["cameras"], f, indent=2)
         with open(os.path.join(out_root, "timings.json"), "w") as f:
             json.dump(res["timings"], f, indent=2)
 
-        #save processed inputs used
+        # save processed inputs used
         inputs_dir = os.path.join(out_root, "compressed_inputs")
         nonlocal_engine.save_processed_images(inputs_dir, format="jpg", quality=90)
 
