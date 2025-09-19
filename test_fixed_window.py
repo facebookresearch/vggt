@@ -1,28 +1,3 @@
- # test_fixed_window.py
-# Fixed-window (1 anchor + last N) camera-only VGGT pose server
-# - First frame becomes the anchor.
-# - Subsequent frames fill a deque of size (window-1).
-# - Once >=2 frames exist, we run inference and choose a fixed world
-#   normalization (origin) exactly once. We report has_origin to the client.
-#
-# Endpoints
-#   GET  /health                → basic info
-#   POST /reset {session_id}    → wipe a session (anchor, recents, origin)
-#   POST /frame (multipart)     → { image: UploadFile, metadata: JSON string }
-#                                 returns latest camera pose + has_origin
-#   GET  /status?session_id=... → session status (anchor set? buffer size? has_origin?)
-#
-# Notes
-# - Requires test_cameras_only.CameraOnlyVGGT with .infer_paths(paths, world_norm_T=None, fix_gauge_once=True)
-#   returning a dict containing:
-#       cameras_world : List[dict]  # per image, already in the fixed world if world_norm_T was provided
-#       world_norm_T  : Optional[List[List[float]]] 4x4 chosen normalization (on first multi-view solve)
-#       timings       : Optional[dict]               e.g. {"total_s": float, "inference_s": float}
-#
-# Thomas-ready:
-# - Adds "has_origin" and "announce_origin" (true only on the first time origin becomes available).
-# - Sphere/arrow logic on Unity can simply watch has_origin to toggle visibility.
-
 from __future__ import annotations
 import argparse
 import asyncio
@@ -42,7 +17,6 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 import uvicorn
 
-# Your camera-only engine
 from test_cameras_only import CameraOnlyVGGT
 
 # --------------------------- config ---------------------------
@@ -51,15 +25,13 @@ from test_cameras_only import CameraOnlyVGGT
 class ServerConfig:
     host: str = "0.0.0.0"
     port: int = 8000
-    window: int = 4          # total frames per inference (1 anchor + (window-1) recents). min=2
-    size: int = 320          # long-side cap (AR preserved)
+    window: int = 4
+    size: int = 320
     debug_root: str = "sessions"
     allow_origins: Optional[List[str]] = None
 
 CFG = ServerConfig()
-GLOBAL_LOCK = asyncio.Lock()  # single-flight guard across all sessions
-
-# --------------------------- sessions -------------------------
+GLOBAL_LOCK = asyncio.Lock()
 
 @dataclass
 class SessionState:
@@ -67,13 +39,11 @@ class SessionState:
     engine: CameraOnlyVGGT
     images_dir: str
     next_frame_id: int = 0
-
-    # Selection + fixed-world normalization
     anchor_path: Optional[str] = None
     anchor_frame_id: Optional[int] = None
-    recent: Deque[str] = field(default_factory=lambda: deque(maxlen=3))  # set maxlen in factory then override
-    world_norm_T: Optional[np.ndarray] = None  # 4x4 transform chosen once and reused
-    origin_frame_id: Optional[int] = None      # frame at which world_norm_T was established
+    recent: Deque[str] = field(default_factory=lambda: deque(maxlen=3))
+    world_norm_T: Optional[np.ndarray] = None
+    origin_frame_id: Optional[int] = None
 
 _sessions: Dict[str, SessionState] = {}
 
@@ -86,14 +56,11 @@ def get_or_create_session(sid: Optional[str]) -> SessionState:
     os.makedirs(images_dir, exist_ok=True)
     engine = CameraOnlyVGGT(size=CFG.size, window=CFG.window)
     st = SessionState(sid=sid, engine=engine, images_dir=images_dir)
-    # enforce "fixed window" recent capacity = window-1, min 1
     st.recent = deque(maxlen=max(1, CFG.window - 1))
     _sessions[sid] = st
     return st
 
-
 def _wipe_dir_tree(path: str) -> None:
-    # best-effort wipe (files only) to keep dirs
     try:
         if os.path.isdir(path):
             for root, _, files in os.walk(path, topdown=False):
@@ -104,7 +71,6 @@ def _wipe_dir_tree(path: str) -> None:
                         pass
     except Exception:
         pass
-
 
 def reset_session(sid: Optional[str]) -> None:
     sid = sid or "default"
@@ -154,19 +120,9 @@ async def post_frame(
     image: UploadFile = File(...),
     metadata: str = Form("{}"),
 ):
-    """
-    Accept exactly one frame.
-    Behavior:
-      - Reject with 409 if any inference is in-flight (global single-flight).
-      - Save the image, update [anchor + last (window-1)].
-      - If <2 total frames: return identity pose + has_origin=False.
-      - Otherwise: run engine on [anchor, recents], keep a fixed world by reusing world_norm_T,
-        set it once on first multi-view solve, and return the latest camera pose.
-    """
     if GLOBAL_LOCK.locked():
         return JSONResponse(status_code=409, content={"status": "busy", "detail": "inference in progress"})
 
-    # Parse metadata
     try:
         meta = json.loads(metadata) if metadata else {}
     except Exception as e:
@@ -177,7 +133,6 @@ async def post_frame(
     sess = get_or_create_session(sid)
 
     async with GLOBAL_LOCK:
-        # --- decode & save ---
         try:
             raw = await image.read()
             pil = Image.open(io.BytesIO(raw))
@@ -199,7 +154,6 @@ async def post_frame(
         except Exception as e:
             return JSONResponse(status_code=500, content={"error": f"failed to save image: {e}"})
 
-        # --- anchor + recents ---
         if sess.anchor_path is None:
             sess.anchor_path = img_path
             sess.anchor_frame_id = fid
@@ -209,7 +163,6 @@ async def post_frame(
         batch_paths = ([sess.anchor_path] if sess.anchor_path else []) + list(sess.recent)
         latest_index = len(batch_paths) - 1
 
-        # --- if not enough views yet, identity + has_origin=False ---
         if len(batch_paths) < 2:
             latest = {
                 "position_m": {"x": 0.0, "y": 0.0, "z": 0.0},
@@ -229,10 +182,11 @@ async def post_frame(
                 "has_origin": has_origin,
                 "announce_origin": False,
                 "latest": latest,
+                "pos": [0.0, 0.0, 0.0],
+                "rpy": [0.0, 0.0, 0.0],
                 "timings": timings,
             }
 
-        # --- run inference on [anchor, last up to (window-1)] ---
         if not hasattr(sess.engine, "infer_paths"):
             return JSONResponse(
                 status_code=500,
@@ -247,12 +201,11 @@ async def post_frame(
         t0 = time.time()
         res = sess.engine.infer_paths(
             batch_paths,
-            world_norm_T=sess.world_norm_T,  # None until first multi-view solve
-            fix_gauge_once=True,             # choose world_norm_T once, then reuse
+            world_norm_T=sess.world_norm_T,
+            fix_gauge_once=True,
         )
         req_ms = (time.time() - t0) * 1000.0
 
-        # Persist world normalization once
         announce_origin = False
         if sess.world_norm_T is None and res.get("world_norm_T") is not None:
             sess.world_norm_T = np.array(res["world_norm_T"], dtype=np.float32)
@@ -284,9 +237,10 @@ async def post_frame(
             "has_origin": has_origin,
             "announce_origin": announce_origin,
             "latest": latest_cam,
+            "pos": [float(px), float(py), float(pz)],
+            "rpy": [float(rr), float(rp), float(ry)],
             "timings": timings,
         }
-        # Only include the transform the moment we first pick it (handy for debugging).
         if announce_origin:
             out["world_norm_T"] = sess.world_norm_T.tolist()
             out["origin_frame_id"] = sess.origin_frame_id
@@ -322,5 +276,4 @@ def main():
     uvicorn.run(app, host=CFG.host, port=CFG.port, log_level="info")
 
 if __name__ == "__main__":
-    main() # Copyright (c) Meta Platforms, Inc. and affiliates.
-# All rights reserved.
+    main()
