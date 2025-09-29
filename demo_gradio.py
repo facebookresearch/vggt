@@ -15,8 +15,6 @@ from datetime import datetime
 import glob
 import gc
 import time
-import json  
-
 
 sys.path.append("vggt/")
 
@@ -38,75 +36,6 @@ model.load_state_dict(torch.hub.load_state_dict_from_url(_URL))
 
 model.eval()
 model = model.to(device)
-
-
-# -------------------------------------------------------------------------
-# small helpers to summarize cameras
-# -------------------------------------------------------------------------
-def _mat_to_euler_xyz_deg(R):
-    """
-    Convert a rotation matrix to XYZ (roll, pitch, yaw) in degrees.
-    Right-handed, OpenCV-like. Minimal, gimbal-lock tolerant.
-    """
-    sy = np.sqrt(R[0, 0] * R[0, 0] + R[1, 0] * R[1, 0])
-    singular = sy < 1e-6
-    if not singular:
-        roll = np.degrees(np.arctan2(R[2, 1], R[2, 2]))
-        pitch = np.degrees(np.arctan2(-R[2, 0], sy))
-        yaw = np.degrees(np.arctan2(R[1, 0], R[0, 0]))
-    else:
-        roll = np.degrees(np.arctan2(-R[1, 2], R[1, 1]))
-        pitch = np.degrees(np.arctan2(-R[2, 0], sy))
-        yaw = 0.0
-    return float(roll), float(pitch), float(yaw)
-
-
-def _cameras_list(preds):
-    """
-    Build a per-frame camera dictionary list from predictions.
-    Assumes preds["extrinsic"], preds["intrinsic"] (S,4,4) and (S,3,3),
-    and optional preds["image_names"] list.
-    """
-    E = preds["extrinsic"]
-    K = preds["intrinsic"]
-    names = preds.get("image_names", [f"{i:06d}.png" for i in range(len(E))])
-    cams = []
-    for i in range(len(E)):
-        #seems like the VGGT extrinsic is camera-from-world; invert to get world-from-camera
-        Twc = np.linalg.inv(E[i])
-        Rwc, t = Twc[:3, :3], Twc[:3, 3]
-        roll, pitch, yaw = _mat_to_euler_xyz_deg(Rwc)
-        cams.append(
-            {
-                "index": int(i),
-                "image": os.path.basename(names[i]) if i < len(names) else f"{i:06d}.png",
-                "position_m": {"x": float(t[0]), "y": float(t[1]), "z": float(t[2])},
-                "euler_xyz_deg": {"roll": roll, "pitch": pitch, "yaw": yaw},
-                "intrinsics": {
-                    "fx": float(K[i][0, 0]),
-                    "fy": float(K[i][1, 1]),
-                    "cx": float(K[i][0, 2]),
-                    "cy": float(K[i][1, 2]),
-                },
-            }
-        )
-    return cams
-
-
-def _cameras_text(cams):
-    ##these are one-liners to be read in the terminal
-    lines = []
-    for c in cams:
-        p = c["position_m"]
-        r = c["euler_xyz_deg"]
-        k = c["intrinsics"]
-        lines.append(
-            f'Camera {c["index"]} ({c["image"]}): '
-            f'pos=[{p["x"]:.3f},{p["y"]:.3f},{p["z"]:.3f}], '
-            f'rpy=[{r["roll"]:.1f},{r["pitch"]:.1f},{r["yaw"]:.1f}], '
-            f'fx={k["fx"]:.1f}, fy={k["fy"]:.1f}, cx={k["cx"]:.1f}, cy={k["cy"]:.1f}'
-        )
-    return "\n".join(lines)
 
 
 # -------------------------------------------------------------------------
@@ -155,26 +84,13 @@ def run_model(target_dir, model) -> dict:
     for key in predictions.keys():
         if isinstance(predictions[key], torch.Tensor):
             predictions[key] = predictions[key].cpu().numpy().squeeze(0)  # remove batch dimension
-    predictions['pose_enc_list'] = None  # remove pose_enc_list
-
-    # [ADDED] Keep image names so we can attribute each camera to a file
-    predictions["image_names"] = image_names
+    predictions['pose_enc_list'] = None # remove pose_enc_list
 
     # Generate world points from depth map
     print("Computing world points from depth map...")
     depth_map = predictions["depth"]  # (S, H, W, 1)
     world_points = unproject_depth_map_to_point_map(depth_map, predictions["extrinsic"], predictions["intrinsic"])
     predictions["world_points_from_depth"] = world_points
-
-    # [ADDED] Build and save per-camera information as JSON next to outputs
-    try:
-        cams = _cameras_list(predictions)
-        cams_path = os.path.join(target_dir, "cameras.json")
-        with open(cams_path, "w") as f:
-            json.dump(cams, f, indent=2)
-        print(f"Wrote per-frame camera info to {cams_path}")
-    except Exception as e:
-        print(f"Warning: could not write cameras.json ({e})")
 
     # Clean up
     torch.cuda.empty_cache()
@@ -325,15 +241,6 @@ def gradio_demo(
     )
     glbscene.export(file_obj=glbfile)
 
-    # [ADDED] Build a readable camera summary for the log pane
-    try:
-        cams = _cameras_list(predictions)
-        cams_text = _cameras_text(cams)
-        cams_hint = "\n\nPer-frame cameras written to cameras.json."
-    except Exception as e:
-        cams_text = f"(Could not summarize cameras: {e})"
-        cams_hint = ""
-
     # Cleanup
     del predictions
     gc.collect()
@@ -341,10 +248,7 @@ def gradio_demo(
 
     end_time = time.time()
     print(f"Total time: {end_time - start_time:.2f} seconds (including IO)")
-    log_msg = (
-        f"Reconstruction Success ({len(all_files)} frames). Waiting for visualization."
-        f"{cams_hint}\n\n{cams_text}"
-    )
+    log_msg = f"Reconstruction Success ({len(all_files)} frames). Waiting for visualization."
 
     return glbfile, log_msg, gr.Dropdown(choices=frame_filter_choices, value=frame_filter, interactive=True)
 
