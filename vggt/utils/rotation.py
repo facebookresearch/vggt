@@ -1,11 +1,3 @@
-# Copyright (c) Meta Platforms, Inc. and affiliates.
-# All rights reserved.
-#
-# This source code is licensed under the license found in the
-# LICENSE file in the root directory of this source tree.
-
-# Modified from PyTorch3D, https://github.com/facebookresearch/pytorch3d
-
 import torch
 import numpy as np
 import torch.nn.functional as F
@@ -24,20 +16,21 @@ def quat_to_mat(quaternions: torch.Tensor) -> torch.Tensor:
         Rotation matrices as tensor of shape (..., 3, 3).
     """
     i, j, k, r = torch.unbind(quaternions, -1)
-    # pyre-fixme[58]: `/` is not supported for operand types `float` and `Tensor`.
-    two_s = 2.0 / (quaternions * quaternions).sum(-1)
+    # Calculate 2/sum(q_i^2)
+    two_s = 2.0 / torch.sum(quaternions * quaternions, dim=-1, keepdim=True) # Keep dim for broadcasting
 
+    # Use broadcasting and rewrite 1 - X as -X + 1
     o = torch.stack(
         (
-            1 - two_s * (j * j + k * k),
+            -two_s * (j * j + k * k) + 1.0, # Rewritten
             two_s * (i * j - k * r),
             two_s * (i * k + j * r),
             two_s * (i * j + k * r),
-            1 - two_s * (i * i + k * k),
+            -two_s * (i * i + k * k) + 1.0, # Rewritten
             two_s * (j * k - i * r),
             two_s * (i * k - j * r),
             two_s * (j * k + i * r),
-            1 - two_s * (i * i + j * j),
+            -two_s * (i * i + j * j) + 1.0, # Rewritten
         ),
         -1,
     )
@@ -63,7 +56,13 @@ def mat_to_quat(matrix: torch.Tensor) -> torch.Tensor:
 
     q_abs = _sqrt_positive_part(
         torch.stack(
-            [1.0 + m00 + m11 + m22, 1.0 + m00 - m11 - m22, 1.0 - m00 + m11 - m22, 1.0 - m00 - m11 + m22], dim=-1
+            [
+                1.0 + m00 + m11 + m22,
+                1.0 + m00 - m11 - m22,
+                1.0 - m00 + m11 - m22,
+                1.0 - m00 - m11 + m22,
+            ],
+            dim=-1,
         )
     )
 
@@ -110,10 +109,8 @@ def _sqrt_positive_part(x: torch.Tensor) -> torch.Tensor:
     """
     ret = torch.zeros_like(x)
     positive_mask = x > 0
-    if torch.is_grad_enabled():
-        ret[positive_mask] = torch.sqrt(x[positive_mask])
-    else:
-        ret = torch.where(positive_mask, torch.sqrt(x), ret)
+    # Avoid inplace operations for export compatibility if gradients aren't needed anyway
+    ret = torch.where(positive_mask, torch.sqrt(x), ret)
     return ret
 
 

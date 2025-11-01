@@ -8,8 +8,8 @@ import logging
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torch.utils.checkpoint import checkpoint
 from typing import Optional, Tuple, Union, List, Dict, Any
+import math
 
 from vggt.layers import PatchEmbed
 from vggt.layers.block import Block
@@ -27,7 +27,6 @@ class Aggregator(nn.Module):
     The Aggregator applies alternating-attention over input frames,
     as described in VGGT: Visual Geometry Grounded Transformer.
 
-    Remember to set model.train() to enable gradient checkpointing to reduce memory usage.
 
     Args:
         img_size (int): Image size in pixels.
@@ -71,10 +70,30 @@ class Aggregator(nn.Module):
     ):
         super().__init__()
 
-        self.__build_patch_embed__(patch_embed, img_size, patch_size, num_register_tokens, embed_dim=embed_dim)
+        # Pass interpolate_antialias=False when building the patch embedder
+        self.__build_patch_embed__(
+             patch_embed,
+             img_size,
+             patch_size,
+             num_register_tokens,
+             embed_dim=embed_dim,
+             interpolate_antialias=False # <-- Change this to False
+        )
+
 
         # Initialize rotary position embedding if frequency > 0
-        self.rope = RotaryPositionEmbedding2D(frequency=rope_freq) if rope_freq > 0 else None
+        if rope_freq > 0:
+            # Calculate max grid dimension based on img_size and patch_size
+            # Use ceiling division in case img_size is not perfectly divisible
+            # Assuming square max processing size derived from img_size
+            max_h_patches = math.ceil(img_size / patch_size)
+            max_w_patches = math.ceil(img_size / patch_size)
+            # max_grid_dim is the maximum coordinate value (0-indexed) + 1
+            max_grid_dim = max(max_h_patches, max_w_patches)
+            self.rope = RotaryPositionEmbedding2D(frequency=rope_freq, max_grid_dim=max_grid_dim)
+        else:
+            self.rope = None
+
         self.position_getter = PositionGetter() if self.rope is not None else None
 
         self.frame_blocks = nn.ModuleList(
@@ -135,10 +154,15 @@ class Aggregator(nn.Module):
         nn.init.normal_(self.register_token, std=1e-6)
 
         # Register normalization constants as buffers
-        for name, value in (("_resnet_mean", _RESNET_MEAN), ("_resnet_std", _RESNET_STD)):
-            self.register_buffer(name, torch.FloatTensor(value).view(1, 1, 3, 1, 1), persistent=False)
-
-        self.use_reentrant = False # hardcoded to False
+        for name, value in (
+            ("_resnet_mean", _RESNET_MEAN),
+            ("_resnet_std", _RESNET_STD),
+        ):
+            self.register_buffer(
+                name,
+                torch.FloatTensor(value).view(1, 1, 3, 1, 1),
+                persistent=False,
+            )
 
     def __build_patch_embed__(
         self,
@@ -146,7 +170,7 @@ class Aggregator(nn.Module):
         img_size,
         patch_size,
         num_register_tokens,
-        interpolate_antialias=True,
+        interpolate_antialias=True, # <-- Default value kept here, but overridden in __init__ call
         interpolate_offset=0.0,
         block_chunks=0,
         init_values=1.0,
@@ -171,7 +195,7 @@ class Aggregator(nn.Module):
                 img_size=img_size,
                 patch_size=patch_size,
                 num_register_tokens=num_register_tokens,
-                interpolate_antialias=interpolate_antialias,
+                interpolate_antialias=interpolate_antialias, # <-- Value passed from __init__ is used here
                 interpolate_offset=interpolate_offset,
                 block_chunks=block_chunks,
                 init_values=init_values,
@@ -181,7 +205,10 @@ class Aggregator(nn.Module):
             if hasattr(self.patch_embed, "mask_token"):
                 self.patch_embed.mask_token.requires_grad_(False)
 
-    def forward(self, images: torch.Tensor) -> Tuple[List[torch.Tensor], int]:
+    def forward(
+        self,
+        images: torch.Tensor,
+    ) -> Tuple[List[torch.Tensor], int]:
         """
         Args:
             images (torch.Tensor): Input images with shape [B, S, 3, H, W], in range [0, 1].
@@ -218,9 +245,13 @@ class Aggregator(nn.Module):
 
         pos = None
         if self.rope is not None:
-            pos = self.position_getter(B * S, H // self.patch_size, W // self.patch_size, device=images.device)
+            # Calculate grid dimensions based on actual input H, W
+            grid_h = H // self.patch_size
+            grid_w = W // self.patch_size
+            pos = self.position_getter(B * S, grid_h, grid_w, device=images.device)
 
-        if self.patch_start_idx > 0:
+
+        if self.patch_start_idx > 0 and pos is not None:
             # do not use position embedding for special tokens (camera and register tokens)
             # so set pos to 0 for the special tokens
             pos = pos + 1
@@ -233,6 +264,10 @@ class Aggregator(nn.Module):
         frame_idx = 0
         global_idx = 0
         output_list = []
+        # Initialize potentially unused variables to None
+        frame_intermediates = None
+        global_intermediates = None
+        concat_inter = None
 
         for _ in range(self.aa_block_num):
             for attn_type in self.aa_order:
@@ -247,14 +282,27 @@ class Aggregator(nn.Module):
                 else:
                     raise ValueError(f"Unknown attention type: {attn_type}")
 
-            for i in range(len(frame_intermediates)):
-                # concat frame and global intermediates, [B x S x P x 2C]
-                concat_inter = torch.cat([frame_intermediates[i], global_intermediates[i]], dim=-1)
-                output_list.append(concat_inter)
+            # Ensure both intermediate lists exist before concatenating
+            if frame_intermediates is not None and global_intermediates is not None:
+                for i in range(len(frame_intermediates)):
+                    # concat frame and global intermediates, [B x S x P x 2C]
+                    concat_inter = torch.cat([frame_intermediates[i], global_intermediates[i]], dim=-1)
+                    output_list.append(concat_inter)
+            # Handle cases where one might be None (should not happen if aa_order has both types)
+            elif frame_intermediates is not None:
+                 output_list.extend(frame_intermediates)
+            elif global_intermediates is not None:
+                 output_list.extend(global_intermediates)
 
-        del concat_inter
-        del frame_intermediates
-        del global_intermediates
+
+        # Clean up potentially large intermediate tensors if possible
+        if frame_intermediates is not None:
+            del frame_intermediates
+        if global_intermediates is not None:
+            del global_intermediates
+        if concat_inter is not None:
+             del concat_inter
+
         return output_list, self.patch_start_idx
 
     def _process_frame_attention(self, tokens, B, S, P, C, frame_idx, pos=None):
@@ -263,19 +311,17 @@ class Aggregator(nn.Module):
         """
         # If needed, reshape tokens or positions:
         if tokens.shape != (B * S, P, C):
-            tokens = tokens.view(B, S, P, C).view(B * S, P, C)
+            tokens = tokens.view(B, S, P, C).contiguous().view(B * S, P, C)
 
         if pos is not None and pos.shape != (B * S, P, 2):
-            pos = pos.view(B, S, P, 2).view(B * S, P, 2)
+            pos = pos.view(B, S, P, 2).contiguous().view(B * S, P, 2)
+
 
         intermediates = []
 
         # by default, self.aa_block_size=1, which processes one block at a time
         for _ in range(self.aa_block_size):
-            if self.training:
-                tokens = checkpoint(self.frame_blocks[frame_idx], tokens, pos, use_reentrant=self.use_reentrant)
-            else:
-                tokens = self.frame_blocks[frame_idx](tokens, pos=pos)
+            tokens = self.frame_blocks[frame_idx](tokens, pos=pos)
             frame_idx += 1
             intermediates.append(tokens.view(B, S, P, C))
 
@@ -286,19 +332,17 @@ class Aggregator(nn.Module):
         Process global attention blocks. We keep tokens in shape (B, S*P, C).
         """
         if tokens.shape != (B, S * P, C):
-            tokens = tokens.view(B, S, P, C).view(B, S * P, C)
+             tokens = tokens.view(B, S, P, C).contiguous().view(B, S * P, C)
+
 
         if pos is not None and pos.shape != (B, S * P, 2):
-            pos = pos.view(B, S, P, 2).view(B, S * P, 2)
+            pos = pos.view(B, S, P, 2).contiguous().view(B, S * P, 2)
 
         intermediates = []
 
         # by default, self.aa_block_size=1, which processes one block at a time
         for _ in range(self.aa_block_size):
-            if self.training:
-                tokens = checkpoint(self.global_blocks[global_idx], tokens, pos, use_reentrant=self.use_reentrant)
-            else:
-                tokens = self.global_blocks[global_idx](tokens, pos=pos)
+            tokens = self.global_blocks[global_idx](tokens, pos=pos)
             global_idx += 1
             intermediates.append(tokens.view(B, S, P, C))
 
@@ -322,10 +366,16 @@ def slice_expand_and_flatten(token_tensor, B, S):
     # Slice out the "query" tokens => shape (1, 1, ...)
     query = token_tensor[:, 0:1, ...].expand(B, 1, *token_tensor.shape[2:])
     # Slice out the "other" tokens => shape (1, S-1, ...)
-    others = token_tensor[:, 1:, ...].expand(B, S - 1, *token_tensor.shape[2:])
+    # Ensure S-1 >= 0
+    num_other_frames = max(0, S - 1)
+    others = token_tensor[:, 1:, ...].expand(B, num_other_frames, *token_tensor.shape[2:])
+
     # Concatenate => shape (B, S, ...)
-    combined = torch.cat([query, others], dim=1)
+    if num_other_frames > 0:
+         combined = torch.cat([query, others], dim=1)
+    else: # Handle case where S=1
+         combined = query
 
     # Finally flatten => shape (B*S, ...)
-    combined = combined.view(B * S, *combined.shape[2:])
+    combined = combined.contiguous().view(B * S, *combined.shape[2:])
     return combined

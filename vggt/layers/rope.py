@@ -69,43 +69,48 @@ class RotaryPositionEmbedding2D(nn.Module):
     Args:
         frequency: Base frequency for the position embeddings. Default: 100.0
         scaling_factor: Scaling factor for frequency computation. Default: 1.0
+        max_grid_dim: The maximum expected dimension (height or width) of the patch grid.
+                      Used to precompute frequencies up to this limit.
 
     Attributes:
         base_frequency: Base frequency for computing position embeddings.
         scaling_factor: Factor to scale the computed frequencies.
         frequency_cache: Cache for storing precomputed frequency components.
+        max_seq_len: Maximum sequence length (max coordinate value + 1) derived from max_grid_dim.
     """
 
-    def __init__(self, frequency: float = 100.0, scaling_factor: float = 1.0):
+    def __init__(self, frequency: float = 100.0, scaling_factor: float = 1.0, max_grid_dim: int = 64):
         """Initializes the 2D RoPE module."""
         super().__init__()
         self.base_frequency = frequency
         self.scaling_factor = scaling_factor
         self.frequency_cache: Dict[Tuple, Tuple[torch.Tensor, torch.Tensor]] = {}
+        # max_seq_len is the maximum coordinate value + 1, which is max_grid_dim
+        self.max_seq_len = max(1, max_grid_dim) # Ensure at least 1
 
     def _compute_frequency_components(
-        self, dim: int, seq_len: int, device: torch.device, dtype: torch.dtype
+        self, dim: int, device: torch.device, dtype: torch.dtype
     ) -> Tuple[torch.Tensor, torch.Tensor]:
-        """Computes frequency components for rotary embeddings.
+        """Computes frequency components for rotary embeddings up to max_seq_len.
 
         Args:
             dim: Feature dimension (must be even).
-            seq_len: Maximum sequence length.
             device: Target device for computations.
             dtype: Data type for the computed tensors.
 
         Returns:
             Tuple of (cosine, sine) tensors for frequency components.
         """
-        cache_key = (dim, seq_len, device, dtype)
+        # Use the pre-calculated max_seq_len for cache key and computation range
+        cache_key = (dim, self.max_seq_len, device, dtype)
         if cache_key not in self.frequency_cache:
             # Compute frequency bands
             exponents = torch.arange(0, dim, 2, device=device).float() / dim
             inv_freq = 1.0 / (self.base_frequency**exponents)
 
-            # Generate position-dependent frequencies
-            positions = torch.arange(seq_len, device=device, dtype=inv_freq.dtype)
-            angles = torch.einsum("i,j->ij", positions, inv_freq)
+            # Generate frequencies up to the maximum possible sequence length
+            positions_range = torch.arange(self.max_seq_len, device=device, dtype=inv_freq.dtype)
+            angles = torch.einsum("i,j->ij", positions_range, inv_freq)
 
             # Compute and cache frequency components
             angles = angles.to(dtype)
@@ -137,16 +142,21 @@ class RotaryPositionEmbedding2D(nn.Module):
 
         Args:
             tokens: Input token features.
-            positions: Position indices.
+            positions: Position indices. Clamped to be within [0, max_seq_len - 1].
             cos_comp: Cosine components for rotation.
             sin_comp: Sine components for rotation.
 
         Returns:
             Tokens with applied rotary position embeddings.
         """
+        # Clamp positions to ensure they are within the valid range [0, max_seq_len - 1]
+        # This is important for F.embedding lookup.
+        clamped_positions = torch.clamp(positions, 0, self.max_seq_len - 1)
+
         # Embed positions with frequency components
-        cos = F.embedding(positions, cos_comp)[:, None, :, :]
-        sin = F.embedding(positions, sin_comp)[:, None, :, :]
+        cos = F.embedding(clamped_positions, cos_comp)[:, None, :, :]
+        sin = F.embedding(clamped_positions, sin_comp)[:, None, :, :]
+
 
         # Apply rotation
         return (tokens * cos) + (self._rotate_features(tokens) * sin)
@@ -173,14 +183,14 @@ class RotaryPositionEmbedding2D(nn.Module):
         # Compute feature dimension for each spatial direction
         feature_dim = tokens.size(-1) // 2
 
-        # Get frequency components
-        max_position = int(positions.max()) + 1
-        cos_comp, sin_comp = self._compute_frequency_components(feature_dim, max_position, tokens.device, tokens.dtype)
+        # Get frequency components computed up to max_seq_len
+        cos_comp, sin_comp = self._compute_frequency_components(feature_dim, tokens.device, tokens.dtype)
 
         # Split features for vertical and horizontal processing
         vertical_features, horizontal_features = tokens.chunk(2, dim=-1)
 
-        # Apply RoPE separately for each dimension
+        # Apply RoPE separately for each dimension using the precomputed components
+        # The _apply_1d_rope function will clamp positions before embedding lookup
         vertical_features = self._apply_1d_rope(vertical_features, positions[..., 0], cos_comp, sin_comp)
         horizontal_features = self._apply_1d_rope(horizontal_features, positions[..., 1], cos_comp, sin_comp)
 

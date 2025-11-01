@@ -1,0 +1,52 @@
+[project]
+authors = [{name = "Jianyuan Wang", email = "jianyuan@robots.ox.ac.uk"}]
+dependencies = [
+    "numpy<2",
+    "Pillow",
+    "huggingface_hub",
+    "einops",
+    "safetensors",
+    "opencv-python",
+]
+name = "vggt"
+requires-python = ">= 3.10"
+version = "0.0.1"
+
+[project.optional-dependencies]
+demo = [
+    "gradio==5.17.1",
+    "viser==0.2.23",
+    "tqdm",
+    "hydra-core",
+    "omegaconf",
+    "opencv-python",
+    "scipy",
+    "onnxruntime",
+    "requests",
+    "trimesh",
+    "matplotlib",
+]
+
+# Using setuptools as the build backend
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+# setuptools configuration
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["vggt*"]
+
+# Pixi configuration
+[tool.pixi.workspace]
+channels = ["conda-forge"]
+platforms = ["linux-64"]
+
+[tool.pixi.pypi-dependencies]
+vggt = { path = ".", editable = true }
+
+[tool.pixi.environments]
+default = { solve-group = "default" }
+demo = { features = ["demo"], solve-group = "default" }
+
+[tool.pixi.tasks]

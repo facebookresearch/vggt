@@ -138,6 +138,56 @@ Furthermore, if certain pixels in the input frames are unwanted (e.g., reflectiv
 
 </details>
 
+## Point Cloud Reconstruction Pipeline
+
+The repository ships with a compact CLI that mirrors the `demo_colmap.py`
+workflow and produces two point clouds (VGGT metric depth + Depth Anything
+rectified depth):
+
+```bash
+python -m reconstruction.simple_pipeline \
+  --input-type images \
+  --path path/to/image_folder \
+  --output-dir pcd_out/session01
+```
+
+### Highlights
+
+- **VGGT bootstrap**: loads `vggt_model.pt`, predicts cameras/depth, and
+  unprojects the metric depth maps to `vggt_point_cloud.ply`.
+- **Depth Anything rectification** *(optional)*: runs the ONNX/TensorRT export under
+  `onnx_exports/depth_anything/`, fits a scale+shift using VGGT depth, and
+  writes `depth_anything_rectified_point_cloud.ply`.
+- **Metadata**: every run stores per-frame intrinsics, extrinsics, and the
+  fitted scale/shift values in `metadata.json`.
+- **Backend choice**: `--depth-backend {auto|tensorrt|onnxruntime}` lets you
+  select TensorRT (fastest when available) or onnxruntime for Depth Anything.
+
+Example for a video sequence:
+
+```bash
+python -m reconstruction.simple_pipeline \
+  --input-type video \
+  --path path/to/cam_0.mp4,path/to/cam_1.mp4 \
+  --stride 2 \
+  --batch-size 8 \
+  --output-dir pcd_out/video_session
+```
+
+Pass `--depth-anything off` to skip the second stage, or override paths via
+`--vggt-weights` and `--depth-anything-engine`. The legacy
+`reconstruction/tools/pcd_inference.py` wrapper now simply forwards to this
+module (emitting a deprecation warning).
+
+Additional knobs and outputs:
+
+- `--depth-backend`: choose `auto` (default), `tensorrt`, or `onnxruntime`.
+- `--depth-workers`: set the number of Depth Anything workers (`0` = auto).
+- `--log-level`: surface per-stage timings by switching to `DEBUG` / `INFO`.
+- Results are written per frame: `frame_<idx>_vggt.ply` for the reference frame
+  and `frame_<idx>_depth_anything.ply` for subsequent frames, plus `metadata.json`
+  summarizing intrinsics/extrinsics, scale/shift, and runtime stats.
+
 
 ## Interactive Demo
 

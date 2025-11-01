@@ -21,6 +21,7 @@ import argparse
 from pathlib import Path
 import trimesh
 import pycolmap
+import shutil
 
 
 from vggt.models.vggt import VGGT
@@ -42,8 +43,10 @@ from vggt.dependency.np_to_pycolmap import batch_np_matrix_to_pycolmap, batch_np
 def parse_args():
     parser = argparse.ArgumentParser(description="VGGT Demo")
     parser.add_argument("--scene_dir", type=str, required=True, help="Directory containing the scene images")
+    parser.add_argument("--output_dir", type=str, required=True, help="Directory to save the reconstruction results")
     parser.add_argument("--seed", type=int, default=42, help="Random seed for reproducibility")
     parser.add_argument("--use_ba", action="store_true", default=False, help="Use BA for reconstruction")
+    parser.add_argument("--overwrite", action="store_true", help="Allow overwriting existing output directory.")
     ######### BA parameters #########
     parser.add_argument(
         "--max_reproj_error", type=float, default=8.0, help="Maximum reprojection error for reconstruction"
@@ -93,6 +96,21 @@ def run_VGGT(model, images, dtype, resolution=518):
 def demo_fn(args):
     # Print configuration
     print("Arguments:", vars(args))
+
+    # Check for existing output and handle overwriting
+    sparse_dir_exists = os.path.isdir(os.path.join(args.output_dir, "sparse"))
+    if sparse_dir_exists and not args.overwrite:
+        raise FileExistsError(
+            f"Output directory '{args.output_dir}' already contains a 'sparse' reconstruction. "
+            "Use the --overwrite flag to overwrite existing files."
+        )
+    
+    # If overwriting, remove the old sparse directory to ensure a clean slate
+    if sparse_dir_exists and args.overwrite:
+        print(f"Overwriting existing reconstruction in {args.output_dir}")
+        shutil.rmtree(os.path.join(args.output_dir, "sparse"))
+
+    os.makedirs(args.output_dir, exist_ok=True)
 
     # Set seed for reproducibility
     np.random.seed(args.seed)
@@ -240,13 +258,34 @@ def demo_fn(args):
         shared_camera=shared_camera,
     )
 
-    print(f"Saving reconstruction to {args.scene_dir}/sparse")
-    sparse_reconstruction_dir = os.path.join(args.scene_dir, "sparse")
+    sparse_reconstruction_dir = os.path.join(args.output_dir, "sparse")
     os.makedirs(sparse_reconstruction_dir, exist_ok=True)
+    
+    # Write COLMAP sparse model
+    print(f"Saving reconstruction to {sparse_reconstruction_dir}")
     reconstruction.write(sparse_reconstruction_dir)
 
     # Save point cloud for fast visualization
-    trimesh.PointCloud(points_3d, colors=points_rgb).export(os.path.join(args.scene_dir, "sparse/points.ply"))
+    # Extract points and colors directly from the final reconstruction for consistency
+    points3D = reconstruction.points3D
+    if points3D:
+        ply_path = os.path.join(sparse_reconstruction_dir, "points.ply")
+        points_for_ply = np.array([p.xyz for p in points3D.values()])
+        colors_for_ply = np.array([p.color for p in points3D.values()])
+        trimesh.PointCloud(points_for_ply, colors=colors_for_ply).export(ply_path)
+        print(f"Saved point cloud visualization to {ply_path}")
+
+    # Copy images to the output directory to create a self-contained project, if necessary
+    if os.path.abspath(args.scene_dir) != os.path.abspath(args.output_dir):
+        output_image_dir = os.path.join(args.output_dir, "images")
+        os.makedirs(output_image_dir, exist_ok=True)
+        print(f"Copying images to {output_image_dir}...")
+        for src_path, base_name in zip(image_path_list, base_image_path_list):
+            shutil.copy(src_path, os.path.join(output_image_dir, base_name))
+    else:
+        print("Output directory is the same as the scene directory. Skipping image copy.")
+        
+    print("Reconstruction complete.")
 
     return True
 

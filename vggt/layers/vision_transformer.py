@@ -93,6 +93,10 @@ class DinoVisionTransformer(nn.Module):
         super().__init__()
         norm_layer = partial(nn.LayerNorm, eps=1e-6)
 
+        # tricky but makes it work
+        self.use_checkpoint = False
+        #
+
         self.num_features = self.embed_dim = embed_dim  # num_features for consistency with other models
         self.num_tokens = 1
         self.n_blocks = depth
@@ -101,7 +105,6 @@ class DinoVisionTransformer(nn.Module):
         self.num_register_tokens = num_register_tokens
         self.interpolate_antialias = interpolate_antialias
         self.interpolate_offset = interpolate_offset
-        self.use_reentrant = False # hardcoded to False
 
         self.patch_embed = embed_layer(img_size=img_size, patch_size=patch_size, in_chans=in_chans, embed_dim=embed_dim)
         num_patches = self.patch_embed.num_patches
@@ -203,8 +206,9 @@ class DinoVisionTransformer(nn.Module):
             kwargs["size"] = (w0, h0)
         patch_pos_embed = nn.functional.interpolate(
             patch_pos_embed.reshape(1, M, M, dim).permute(0, 3, 1, 2),
-            mode="bicubic",
-            antialias=self.interpolate_antialias,
+            mode="bilinear", # Changed from bicubic to bilinear
+            antialias=self.interpolate_antialias, # This should be False from previous step
+            align_corners=False, # Bilinear default is False, but let's be explicit
             **kwargs,
         )
         assert (w0, h0) == patch_pos_embed.shape[-2:]
@@ -221,7 +225,14 @@ class DinoVisionTransformer(nn.Module):
         x = x + self.interpolate_pos_encoding(x, w, h)
 
         if self.register_tokens is not None:
-            x = torch.cat((x[:, :1], self.register_tokens.expand(x.shape[0], -1, -1), x[:, 1:]), dim=1)
+            x = torch.cat(
+                (
+                    x[:, :1],
+                    self.register_tokens.expand(x.shape[0], -1, -1),
+                    x[:, 1:],
+                ),
+                dim=1,
+            )
 
         return x
 
@@ -229,8 +240,9 @@ class DinoVisionTransformer(nn.Module):
         x = [self.prepare_tokens_with_masks(x, masks) for x, masks in zip(x_list, masks_list)]
 
         for blk in self.blocks:
-            if self.training:
-                x = checkpoint(blk, x, use_reentrant=self.use_reentrant)
+            if self.use_checkpoint:
+                # Ensure use_reentrant=False if checkpointing with dynamo/export
+                x = checkpoint(blk, x, use_reentrant=False)
             else:
                 x = blk(x)
 
@@ -256,8 +268,9 @@ class DinoVisionTransformer(nn.Module):
         x = self.prepare_tokens_with_masks(x, masks)
 
         for blk in self.blocks:
-            if self.training:
-                x = checkpoint(blk, x, use_reentrant=self.use_reentrant)
+            if self.use_checkpoint:
+                # Ensure use_reentrant=False if checkpointing with dynamo/export
+                x = checkpoint(blk, x, use_reentrant=False)
             else:
                 x = blk(x)
 
@@ -314,10 +327,13 @@ class DinoVisionTransformer(nn.Module):
         outputs = [out[:, 1 + self.num_register_tokens :] for out in outputs]
         if reshape:
             B, _, w, h = x.shape
+            patch_w = w // self.patch_size
+            patch_h = h // self.patch_size
             outputs = [
-                out.reshape(B, w // self.patch_size, h // self.patch_size, -1).permute(0, 3, 1, 2).contiguous()
+                out.reshape(B, patch_h, patch_w, -1).permute(0, 3, 1, 2).contiguous()
                 for out in outputs
             ]
+
         if return_class_token:
             return tuple(zip(outputs, class_tokens))
         return tuple(outputs)
@@ -327,6 +343,8 @@ class DinoVisionTransformer(nn.Module):
         if is_training:
             return ret
         else:
+            # Assuming the head expects clstoken if not training
+            # This might need adjustment based on actual head usage
             return self.head(ret["x_norm_clstoken"])
 
 
