@@ -5,3 +5,5 @@ Pillow
 huggingface_hub
 einops
 safetensors
+scikit-image
+tqdm
