@@ -142,6 +142,12 @@ def load_and_preprocess_images(
     if mode not in ["crop", "pad"]:
         raise ValueError("Mode must be either 'crop' or 'pad'")
 
+    bg_map = {
+        "black": (0.0, 0.0, 0.0),
+        "white": (1.0, 1.0, 1.0),
+        "imagenet_mean": _IMAGENET_MEAN,
+    }
+
     images = []
     masks = []
     shapes = set()
@@ -197,7 +203,8 @@ def load_and_preprocess_images(
         if img.shape[0] == 4:
             mask = img[3]
             img = img[:3]
-            bg = torch.ones_like(img) * img.new_tensor(_IMAGENET_MEAN)[:, None, None]
+            bg_col = bg_map.get(backgroud_color, (1.0, 1.0, 1.0))
+            bg = img.new_tensor(bg_col).view(3, 1, 1)
             img = img * mask + bg * (1 - mask)
         else:
             mask = torch.ones_like(img[0])
