@@ -27,6 +27,7 @@ def load_and_preprocess_images_square(image_path_list, target_size=1024):
     Returns:
         tuple: (
             torch.Tensor: Batched tensor of preprocessed images with shape (N, 3, target_size, target_size),
+            torch.Tensor: Batched tensor of original image coordinates with shape (N, 5)
             torch.Tensor: Array of shape (N, 5) containing [x1, y1, x2, y2, width, height] for each image
         )
 
@@ -102,7 +103,7 @@ def load_and_preprocess_images_square(image_path_list, target_size=1024):
 def load_and_preprocess_images(
     image_path_list: list[str],
     mode: Literal["crop", "pad"]="crop",
-    backgroud_color: Literal["white", "black", "imagenet_mean"]="white",
+    background_color: Literal["white", "black", "imagenet_mean"]="white",
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """
     A quick start function to load and preprocess images for model input.
@@ -114,7 +115,7 @@ def load_and_preprocess_images(
                              - "crop" (default): Sets width to 518px and center crops height if needed.
                              - "pad": Preserves all pixels by making the largest dimension 518px
                                and padding the smaller dimension to reach a square shape.
-        backgroud_color (str, optional): Background color for transparent images to blend onto,
+        background_color (str, optional): Background color for transparent images to blend onto,
             either "white", "black" or "imagenet_mean". Defaults to "white".
 
     Returns:
@@ -203,7 +204,7 @@ def load_and_preprocess_images(
         if img.shape[0] == 4:
             mask = img[3]
             img = img[:3]
-            bg_col = bg_map.get(backgroud_color, (1.0, 1.0, 1.0))
+            bg_col = bg_map.get(background_color, (1.0, 1.0, 1.0))
             bg = img.new_tensor(bg_col).view(3, 1, 1)
             img = img * mask + bg * (1 - mask)
         else:
