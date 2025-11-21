@@ -93,6 +93,8 @@ def run_model(target_dir, model) -> dict:
     world_points = unproject_depth_map_to_point_map(depth_map, predictions["extrinsic"], predictions["intrinsic"])
     predictions["world_points_from_depth"] = world_points
 
+    predictions["alpha_masks"] = alpha_masks.cpu().numpy()
+
     # Clean up
     torch.cuda.empty_cache()
     return predictions
@@ -300,6 +302,7 @@ def update_visualization(
         "extrinsic",
         "intrinsic",
         "world_points_from_depth",
+        "alpha_masks",
     ]
 
     loaded = np.load(predictions_path)

@@ -35,6 +35,7 @@ def predictions_to_glb(
             - world_points_conf: Confidence scores (S, H, W)
             - images: Input images (S, H, W, 3)
             - extrinsic: Camera extrinsic matrices (S, 3, 4)
+            - alpha_masks: Alpha masks (S, 1, H, W)
         conf_thres (float): Percentage of low-confidence points to filter out (default: 50.0)
         filter_by_frames (str): Frame filter specification (default: "all")
         mask_black_bg (bool): Mask out black background pixels (default: False)
@@ -81,6 +82,8 @@ def predictions_to_glb(
 
     # Get images from predictions
     images = predictions["images"]
+    # Get alpha masks from predictions
+    alpha_masks = predictions.get("alpha_masks", np.ones_like(pred_world_points[..., 0]))
     # Use extrinsic matrices instead of pred_extrinsic_list
     camera_matrices = predictions["extrinsic"]
 
@@ -149,6 +152,13 @@ def predictions_to_glb(
     colors_rgb = (colors_rgb.reshape(-1, 3) * 255).astype(np.uint8)
 
     conf = pred_world_points_conf.reshape(-1)
+    alpha_filter = alpha_masks.flatten() > .5 # visibility threshold at 50%
+
+    # Filter out transparent pixels
+    vertices_3d = vertices_3d[alpha_filter]
+    colors_rgb = colors_rgb[alpha_filter]
+    conf = conf[alpha_filter]
+
     # Convert percentage threshold to actual confidence value
     if conf_thres == 0.0:
         conf_threshold = 0.0
