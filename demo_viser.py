@@ -356,7 +356,8 @@ def main():
     image_names = glob.glob(os.path.join(args.image_folder, "*"))
     print(f"Found {len(image_names)} images")
 
-    images = load_and_preprocess_images(image_names).to(device)
+    images, alpha_masks = load_and_preprocess_images(image_names)
+    images = images.to(device)
     print(f"Preprocessed images shape: {images.shape}")
 
     print("Running inference...")

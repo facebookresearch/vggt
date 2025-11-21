@@ -63,7 +63,8 @@ def run_model(target_dir, model) -> dict:
     if len(image_names) == 0:
         raise ValueError("No images found. Check your upload.")
 
-    images = load_and_preprocess_images(image_names).to(device)
+    images, alpha_masks = load_and_preprocess_images(image_names)
+    images = images.to(device)
     print(f"Preprocessed images shape: {images.shape}")
 
     # Run inference
