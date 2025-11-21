@@ -53,6 +53,7 @@ def viser_wrapper(
                 "depth_conf": (S, H, W),
                 "extrinsic": (S, 3, 4),
                 "intrinsic": (S, 3, 3),
+                "alpha_masks": (S, H, W),
             }
         port (int): Port number for the viser server.
         init_conf_threshold (float): Initial percentage of low-confidence points to filter out.
@@ -77,6 +78,8 @@ def viser_wrapper(
     extrinsics_cam = pred_dict["extrinsic"]  # (S, 3, 4)
     intrinsics_cam = pred_dict["intrinsic"]  # (S, 3, 3)
 
+    alpha_masks = pred_dict["alpha_masks"]  # (S, H, W)
+
     # Compute world points from depth if not using the precomputed point map
     if not use_point_map:
         world_points = unproject_depth_map_to_point_map(depth_map, extrinsics_cam, intrinsics_cam)
@@ -98,6 +101,12 @@ def viser_wrapper(
     points = world_points.reshape(-1, 3)
     colors_flat = (colors.reshape(-1, 3) * 255).astype(np.uint8)
     conf_flat = conf.reshape(-1)
+
+    alpha_filter = alpha_masks.flatten() > .5  # visibility threshold at 50%
+
+    points = points[alpha_filter]
+    colors_flat = colors_flat[alpha_filter]
+    conf_flat = conf_flat[alpha_filter]
 
     cam_to_world_mat = closed_form_inverse_se3(extrinsics_cam)  # shape (S, 4, 4) typically
     # For convenience, we store only (3,4) portion
@@ -376,6 +385,9 @@ def main():
     for key in predictions.keys():
         if isinstance(predictions[key], torch.Tensor):
             predictions[key] = predictions[key].cpu().numpy().squeeze(0)  # remove batch dimension and convert to numpy
+
+    # Process alpha masks separate from predictions due to shape mismatch (no batch dim)
+    predictions["alpha_masks"] = alpha_masks.cpu().numpy().squeeze(1)
 
     if args.use_point_map:
         print("Visualizing 3D points from point map")
