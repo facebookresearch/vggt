@@ -1,114 +1,159 @@
-"""
-Script de visualización para clusters de cámaras.
-Versión: view_cluster_v3
-
-Características:
-- Visualiza la posición de las cámaras en 3D.
-- Muestra la orientación mediante frustums.
-- NO muestra trayectoria (líneas).
-- NO enfatiza altura (ejes o análisis de Z), solo geometría relativa.
-
-Requisitos:
-- pandas, numpy, matplotlib
-"""
-
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
 from mpl_toolkits.mplot3d.art3d import Poly3DCollection
-import ast
+import json
 from tkinter import filedialog, Tk
 
 def select_file(prompt):
+    """Abre un diálogo para seleccionar un archivo CSV."""
     root = Tk()
     root.withdraw()
-    file_path = filedialog.askopenfilename(title=prompt, filetypes=[("CSV Files", "*.csv")])
-    root.destroy()
-    return file_path
+    return filedialog.askopenfilename(title=prompt, filetypes=[("CSV Files", "*.csv")])
 
-def draw_camera_frustum(ax, R, C, scale=1.0, color='cyan'):
-    w = 0.5 * scale
-    h = 0.35 * scale
-    d = 1.0 * scale 
+def create_camera_frustum(R, C, scale=0.5):
+    """
+    Crea los vértices de una pirámide (frustum) de cámara para visualización.
     
-    # Vértices en coordenadas de cámara (OpenCV)
-    v_cam = np.array([
+    Args:
+        R (np.array): Matriz de rotación (3x3) World-to-Camera o Camera-to-World (aquí asumimos R_wc).
+        C (np.array): Centro de la cámara (3,).
+        scale (float): Tamaño del frustum.
+    
+    Returns:
+        np.array: Vértices del frustum en coordenadas del mundo.
+    """
+    # Definir un frustum canónico en el sistema de coordenadas de la cámara (OpenCV)
+    # Origen (0,0,0) y 4 esquinas en el plano de imagen (Z positivo hacia adelante)
+    w = scale
+    h = scale * 0.75 
+    z = scale * 1.5
+    
+    # Vértices en coordenadas locales de cámara
+    # 0: Centro óptico
+    # 1-4: Esquinas del plano de imagen
+    local_frustum = np.array([
         [0, 0, 0],          # Centro
-        [-w, -h, d],        # TL
-        [w, -h, d],         # TR
-        [w, h, d],          # BR
-        [-w, h, d]          # BL
-    ])
-    
-    # Transformar a mundo: P_world = R.T @ P_cam + C
-    R_wc = R.T
-    v_world = (R_wc @ v_cam.T).T + C
-    
-    verts = [
-        [v_world[0], v_world[1], v_world[2]], 
-        [v_world[0], v_world[2], v_world[3]], 
-        [v_world[0], v_world[3], v_world[4]], 
-        [v_world[0], v_world[4], v_world[1]], 
-        [v_world[1], v_world[2], v_world[3], v_world[4]] 
-    ]
-    
-    ax.add_collection3d(Poly3DCollection(verts, facecolors=color, linewidths=1, edgecolors='k', alpha=0.25))
-    
-    # Eje Z local (dirección de vista)
-    z_end = (R_wc @ np.array([0, 0, d*1.5])) + C
-    ax.plot([C[0], z_end[0]], [C[1], z_end[1]], [C[2], z_end[2]], color='blue', linewidth=1)
+        [-w, -h, z],        # Top-Left
+        [w, -h, z],         # Top-Right
+        [w, h, z],          # Bottom-Right
+        [-w, h, z]          # Bottom-Left
+    ]).T # (3, 5)
 
-def visualize_cluster_v3(csv_path):
-    print(f"Cargando {csv_path}...")
-    df = pd.read_csv(csv_path)
+    # Transformar al mundo: P_world = R_wc * P_cam + C
+    world_frustum = (R @ local_frustum).T + C
     
-    fig = plt.figure(figsize=(10, 8))
+    return world_frustum
+
+def plot_cameras_vx(csv_path):
+    # Cargar datos
+    try:
+        df = pd.read_csv(csv_path)
+    except Exception as e:
+        print(f"Error al leer el archivo CSV: {e}")
+        return
+    
+    # Preparar figura 3D
+    fig = plt.figure(figsize=(12, 10))
     ax = fig.add_subplot(111, projection='3d')
     
-    # Usamos tx, ty, tz calculados en extract_information_v3
-    coords = df[['tx', 'ty', 'tz']].values
+    positions = []
     
-    # Escala automática
-    if len(coords) > 1:
-        max_range = np.max(np.ptp(coords, axis=0))
-        scale = max_range * 0.05 if max_range > 0 else 1.0
-    else:
-        scale = 1.0
+    # Calcular escala de la escena para ajustar el tamaño de los frustums automáticamente
+    all_tx = df['tx'].values
+    all_ty = df['ty'].values
+    all_tz = df['tz'].values
+    
+    scene_spread = np.max([
+        np.max(all_tx) - np.min(all_tx),
+        np.max(all_ty) - np.min(all_ty),
+        np.max(all_tz) - np.min(all_tz)
+    ])
+    
+    # Ajustar tamaño del frustum (5% del tamaño de la escena)
+    frustum_scale = scene_spread * 0.05 if scene_spread > 0 else 0.1
 
-    print(f"Visualizando {len(df)} cámaras...")
-    
-    for idx, row in df.iterrows():
+    print(f"Renderizando {len(df)} cámaras...")
+
+    # Colormap basado en el índice (solo para diferenciar visualmente, no implica orden temporal en el gráfico)
+    colors = plt.cm.jet(np.linspace(0, 1, len(df)))
+
+    for i, row in df.iterrows():
+        # Extraer posición
         C = np.array([row['tx'], row['ty'], row['tz']])
+        positions.append(C)
         
-        if 'R_flat' in row:
-            R_flat = ast.literal_eval(row['R_flat']) if isinstance(row['R_flat'], str) else row['R_flat']
-            R = np.array(R_flat).reshape(3, 3)
-            
-            draw_camera_frustum(ax, R, C, scale=scale, color='cyan')
-            ax.text(C[0], C[1], C[2], str(idx+1), color='black', fontsize=8)
+        # Extraer Rotación (string JSON a numpy)
+        try:
+            R_wc = np.array(json.loads(row['rotation_matrix_wc']))
+        except KeyError:
+            print(f"Error: La columna 'rotation_matrix_wc' no se encuentra o tiene formato incorrecto en la fila {i}.")
+            continue
+        
+        # Crear Frustum
+        verts = create_camera_frustum(R_wc, C, scale=frustum_scale)
+        
+        # Definir las caras del polígono para dibujar
+        # Vértices: 0=Centro, 1=TL, 2=TR, 3=BR, 4=BL
+        
+        # Lados de la pirámide
+        sides = [
+            [verts[0], verts[1], verts[2]],
+            [verts[0], verts[2], verts[3]],
+            [verts[0], verts[3], verts[4]],
+            [verts[0], verts[4], verts[1]]
+        ]
+        # Base de la pirámide (plano de imagen)
+        base = [[verts[1], verts[2], verts[3], verts[4]]]
+        
+        # Dibujar Lados (translúcidos)
+        ax.add_collection3d(Poly3DCollection(sides, facecolors=colors[i], linewidths=0.5, edgecolors='k', alpha=0.15))
+        # Dibujar Base (más sólida para indicar la dirección)
+        ax.add_collection3d(Poly3DCollection(base, facecolors=colors[i], linewidths=0.5, edgecolors='k', alpha=0.4))
+        
+        # Dibujar punto central (posición exacta)
+        ax.scatter(C[0], C[1], C[2], color=colors[i], s=20)
 
-    # Configuración
-    ax.set_title('Posiciones de Cámara (VGGT)')
-    ax.set_xlabel('X')
-    ax.set_ylabel('Y')
-    ax.set_zlabel('Z') # Mantenemos eje Z para la geometría 3D, pero sin énfasis en "Altura"
+    # --- Se ha eliminado la línea de trayectoria (ax.plot) ---
+
+    # Convertir posiciones a numpy para ajustar ejes
+    positions = np.array(positions)
+
+    # Etiquetas y Estilo
+    ax.set_title(f'Cluster de Cámaras VGGT ({len(df)} vistas)', fontsize=14)
+    ax.set_xlabel('X (Mundo)')
+    ax.set_ylabel('Y (Mundo)')
+    ax.set_zlabel('Z (Mundo)')
     
-    # Límites cúbicos
-    if len(coords) > 0:
-        limits = np.array([ax.get_xlim3d(), ax.get_ylim3d(), ax.get_zlim3d()])
-        origin = np.mean(limits, axis=1)
-        radius = 0.5 * np.max(np.abs(limits[:, 1] - limits[:, 0]))
-        if radius == 0: radius = 1.0
-        
-        ax.set_xlim3d([origin[0] - radius, origin[0] + radius])
-        ax.set_ylim3d([origin[1] - radius, origin[1] + radius])
-        ax.set_zlim3d([origin[2] - radius, origin[2] + radius])
+    # Ajuste de ejes para que sean isométricos (evita distorsión visual)
+    if len(positions) > 0:
+        max_range = np.array([
+            positions[:,0].max()-positions[:,0].min(), 
+            positions[:,1].max()-positions[:,1].min(), 
+            positions[:,2].max()-positions[:,2].min()
+        ]).max() / 2.0
+
+        mid_x = (positions[:,0].max()+positions[:,0].min()) * 0.5
+        mid_y = (positions[:,1].max()+positions[:,1].min()) * 0.5
+        mid_z = (positions[:,2].max()+positions[:,2].min()) * 0.5
+
+        ax.set_xlim(mid_x - max_range, mid_x + max_range)
+        ax.set_ylim(mid_y - max_range, mid_y + max_range)
+        ax.set_zlim(mid_z - max_range, mid_z + max_range)
     
+    # Vista inicial
+    ax.view_init(elev=-70, azim=-90) 
+    
+    plt.tight_layout()
     plt.show()
 
 if __name__ == "__main__":
-    print("Selecciona archivo CSV...")
-    csv_path = select_file("Selecciona camera_parameters_v3.csv")
-    if csv_path:
-        visualize_cluster_v3(csv_path)
+    print("Selecciona el archivo CSV generado (vggt_camera_data.csv)...")
+    csv_file = select_file("Selecciona el archivo vggt_camera_data.csv")
+    
+    if csv_file:
+        print(f"Visualizando: {csv_file}")
+        plot_cameras_vx(csv_file)
+    else:
+        print("Operación cancelada.")
