@@ -1,176 +1,169 @@
-"""
-Script mejorado para procesar imágenes con el modelo VGGT y extraer parámetros de cámara detallados.
-Versión: extract_information_v2
-
-Mejoras respecto a v1:
-- Procesa las imágenes como una SECUENCIA (batch) para aprovechar el mecanismo de atención de VGGT y obtener consistencia en la escala y geometría (crucial para la estimación de altura).
-- Extracción explícita de parámetros intrínsecos (f, cx, cy).
-- Estimación de pose de cámara (Posición X, Y, Z y Orientación R).
-- Cálculo de la posición de la cámara en coordenadas del mundo (C = -R^T * t).
-- Escalado correcto de intrínsecos a la resolución original de la imagen.
-- Salida de ángulos de Euler para la orientación.
-
-Requisitos:
-- torch, torchvision
-- PIL, matplotlib, pandas, numpy
-- vggt
-"""
-
 import os
 import torch
 import numpy as np
 import pandas as pd
-import PIL.Image
-import math
 from tkinter import filedialog, Tk
+import json
+import matplotlib.pyplot as plt
+from PIL import Image
+import gc
 
+# Importaciones específicas de VGGT
 from vggt.models.vggt import VGGT
 from vggt.utils.load_fn import load_and_preprocess_images
 from vggt.utils.pose_enc import pose_encoding_to_extri_intri
 
+# --- CONFIGURACIÓN ---
+BATCH_SIZE = 10  # Mantén esto bajo (10-20) para evitar colapsar la GPU
+# ---------------------
+
 def select_folder(prompt):
     root = Tk()
     root.withdraw()
-    folder_path = filedialog.askdirectory(title=prompt)
-    root.destroy()
-    return folder_path
+    return filedialog.askdirectory(title=prompt)
 
-def rotation_matrix_to_euler_angles(R):
+def extract_camera_parameters(extrinsic, intrinsic):
     """
-    Convierte una matriz de rotación 3x3 a ángulos de Euler (pitch, yaw, roll) en radianes.
-    Convención XYZ.
+    Descompone las matrices de VGGT.
+    Entrada: Extrínseca [R|t] (World-to-Camera).
+    Salida: Pose (Camera-to-World) -> Centro y Orientación.
     """
-    sy = math.sqrt(R[0, 0] * R[0, 0] + R[1, 0] * R[1, 0])
-    singular = sy < 1e-6
+    # 1. Intrínsecos
+    fx = intrinsic[0, 0]
+    fy = intrinsic[1, 1]
+    cx = intrinsic[0, 2]
+    cy = intrinsic[1, 2]
+    focal_length = (fx + fy) / 2.0
 
-    if not singular:
-        x = math.atan2(R[2, 1], R[2, 2])
-        y = math.atan2(-R[2, 0], sy)
-        z = math.atan2(R[1, 0], R[0, 0])
-    else:
-        x = math.atan2(-R[1, 2], R[1, 1])
-        y = math.atan2(-R[2, 0], sy)
-        z = 0
+    # 2. Extrínsecos (World -> Cam)
+    R_cw = extrinsic[:3, :3]
+    t_cw = extrinsic[:3, 3]
 
-    return np.array([x, y, z])
+    # 3. Pose (Cam -> World)
+    # Orientación de la cámara en el mundo
+    R_wc = R_cw.T
+    # Posición de la cámara en el mundo (C = -R^T * t)
+    camera_center = -np.dot(R_wc, t_cw)
 
-def process_images_v2(input_folder, output_folder):
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-    dtype = torch.bfloat16 if torch.cuda.get_device_capability()[0] >= 8 else torch.float16
+    return {
+        "focal_length": float(focal_length),
+        "principal_point": [float(cx), float(cy)],
+        "intrinsic_matrix": intrinsic.tolist(), 
+        "camera_position": camera_center.tolist(), # [X, Y, Z] (OpenCV coords)
+        "rotation_matrix_wc": R_wc.tolist()        # Orientación (OpenCV coords)
+    }
 
-    print(f"Cargando modelo VGGT en {device}...")
-    model = VGGT.from_pretrained("facebook/VGGT-1B").to(device)
-    model.eval()
-
-    # Obtener lista de archivos
-    image_files = sorted([f for f in os.listdir(input_folder) if f.lower().endswith(('png', 'jpg', 'jpeg'))])
-    if not image_files:
-        print("No se encontraron imágenes en la carpeta seleccionada.")
-        return
-
-    print(f"Encontradas {len(image_files)} imágenes. Cargando secuencia...")
-
-    img_paths = [os.path.join(input_folder, f) for f in image_files]
+def save_depth_map(depth_tensor, output_path):
+    """Guarda mapa de profundidad con colormap Turbo."""
+    depth = depth_tensor + 1e-6
+    inverse_depth = 1.0 / depth
     
-    # Cargar todas las imágenes como una secuencia [S, 3, H, W]
-    # Esto es CRUCIAL para que VGGT entienda la geometría global y la escala relativa entre imágenes.
+    # Normalización robusta (percentiles 5-95)
+    vmax = np.percentile(inverse_depth, 95)
+    vmin = np.percentile(inverse_depth, 5)
+    inverse_depth_normalized = (inverse_depth - vmin) / (vmax - vmin + 1e-8)
+    inverse_depth_normalized = np.clip(inverse_depth_normalized, 0, 1)
+    
+    cmap = plt.get_cmap("turbo")
+    color_depth = (cmap(inverse_depth_normalized)[..., :3] * 255).astype(np.uint8)
+    Image.fromarray(color_depth).save(output_path, format="JPEG", quality=85)
+
+def process_batch(model, batch_files, input_folder, depth_out_dir, device, dtype):
+    image_paths = [os.path.join(input_folder, f) for f in batch_files]
+    
     try:
-        images_seq = load_and_preprocess_images(img_paths).to(device)
+        images_tensor = load_and_preprocess_images(image_paths).to(device)
+        if images_tensor.ndim == 4:
+            images_tensor = images_tensor.unsqueeze(0)
     except Exception as e:
-        print(f"Error cargando imágenes: {e}")
-        print("Intenta con menos imágenes si es un error de memoria.")
+        print(f"Error cargando batch: {e}")
+        return []
+
+    with torch.no_grad():
+        with torch.amp.autocast('cuda', dtype=dtype):
+            predictions = model(images_tensor)
+
+    pose_enc = predictions["pose_enc"]
+    img_size_hw = images_tensor.shape[-2:]
+    extrinsics, intrinsics = pose_encoding_to_extri_intri(pose_enc, img_size_hw)
+    
+    extrinsics = extrinsics.squeeze(0).cpu().numpy().astype(np.float64)
+    intrinsics = intrinsics.squeeze(0).cpu().numpy().astype(np.float64)
+
+    depths_np = None
+    if "depth" in predictions:
+        depths_np = predictions["depth"].squeeze(0).squeeze(-1).cpu().numpy()
+
+    batch_records = []
+    
+    for i, img_name in enumerate(batch_files):
+        params = extract_camera_parameters(extrinsics[i], intrinsics[i])
+        
+        depth_filename = ""
+        if depths_np is not None:
+            depth_filename = f"depth_{os.path.splitext(img_name)[0]}.jpeg"
+            save_depth_map(depths_np[i], os.path.join(depth_out_dir, depth_filename))
+
+        record = {
+            "image_name": img_name,
+            "depth_map_file": depth_filename,
+            "f": params["focal_length"],
+            "cx": params["principal_point"][0],
+            "cy": params["principal_point"][1],
+            "tx": params["camera_position"][0],
+            "ty": params["camera_position"][1],
+            "tz": params["camera_position"][2],
+            "intrinsic_matrix": json.dumps(params["intrinsic_matrix"]),
+            "rotation_matrix_wc": json.dumps(params["rotation_matrix_wc"]) 
+        }
+        batch_records.append(record)
+    
+    del images_tensor, predictions, pose_enc, extrinsics, intrinsics
+    if depths_np is not None: del depths_np
+    torch.cuda.empty_cache()
+    
+    return batch_records
+
+def process_images_vx(input_folder, output_folder):
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    dtype = torch.bfloat16 if torch.cuda.is_available() and torch.cuda.get_device_capability()[0] >= 8 else torch.float16
+    
+    print(f"Dispositivo: {device} ({dtype})")
+    try:
+        model = VGGT.from_pretrained("facebook/VGGT-1B").to(device)
+        model.eval()
+    except Exception as e:
+        print(f"Error cargando modelo: {e}")
         return
 
-    # Añadir dimensión de batch [1, S, 3, H, W]
-    images_batch = images_seq.unsqueeze(0)
-
-    print("Ejecutando inferencia VGGT (esto puede tardar)...")
-    with torch.no_grad():
-        with torch.cuda.amp.autocast(dtype=dtype):
-            predictions = model(images_batch)
-
-    # Obtener matrices [1, S, 3, 4] y [1, S, 3, 3]
-    # Usamos la resolución del modelo (518x518) para decodificar, luego escalaremos.
-    model_res = images_seq.shape[-2:] # (518, 518) usualmente
-    extrinsic_batch, intrinsic_batch = pose_encoding_to_extri_intri(predictions["pose_enc"], model_res)
+    valid_ext = ('.png', '.jpg', '.jpeg', '.bmp')
+    image_files = sorted([f for f in os.listdir(input_folder) if f.lower().endswith(valid_ext)])
     
-    # Eliminar dimensión de batch -> [S, 3, 4]
-    extrinsics = extrinsic_batch.squeeze(0).cpu().numpy()
-    intrinsics = intrinsic_batch.squeeze(0).cpu().numpy()
+    if not image_files:
+        print("No se encontraron imágenes.")
+        return
 
-    data_records = []
-    print("Procesando resultados y extrayendo parámetros...")
+    print(f"Procesando {len(image_files)} imágenes...")
+    depth_out_dir = os.path.join(output_folder, "depth_maps")
+    os.makedirs(depth_out_dir, exist_ok=True)
+    
+    all_records = []
 
-    for i, img_file in enumerate(image_files):
-        img_path = img_paths[i]
-        
-        # Cargar dimensiones originales
-        with PIL.Image.open(img_path) as img_pil:
-            orig_w, orig_h = img_pil.size
-        
-        # Matrices actuales
-        extrinsic_np = extrinsics[i] # 3x4
-        intrinsic_np = intrinsics[i] # 3x3
-        
-        # --- 1. Escalado de Intrínsecos ---
-        model_h, model_w = model_res
-        scale_x = orig_w / model_w
-        scale_y = orig_h / model_h
-        
-        fx = intrinsic_np[0, 0] * scale_x
-        fy = intrinsic_np[1, 1] * scale_y
-        cx = intrinsic_np[0, 2] * scale_x
-        cy = intrinsic_np[1, 2] * scale_y
-        
-        # --- 2. Extrínsecos (Pose) ---
-        # Extrinsic matrix is [R | t] (World -> Camera)
-        R = extrinsic_np[:3, :3]
-        t = extrinsic_np[:3, 3]
-        
-        # Calcular posición de la cámara en el mundo (Camera Center)
-        # C = -R^T * t
-        camera_position = -R.T @ t
-        X_c, Y_c, Z_c = camera_position
-        
-        # Calcular Orientación (Ángulos de Euler)
-        euler_angles = rotation_matrix_to_euler_angles(R)
-        pitch, yaw, roll = euler_angles
-        
-        record = {
-            "image_name": img_file,
-            "focal_length_x": fx,
-            "focal_length_y": fy,
-            "principal_point_x": cx,
-            "principal_point_y": cy,
-            "camera_x": X_c,
-            "camera_y": Y_c,
-            "camera_z": Z_c, # Altura estimada
-            "pitch": pitch,
-            "yaw": yaw,
-            "roll": roll,
-            "R_flat": R.flatten().tolist(),
-            "t_flat": t.flatten().tolist()
-        }
-        data_records.append(record)
-        print(f"Img: {img_file} | Altura (Z): {Z_c:.2f}")
+    for i in range(0, len(image_files), BATCH_SIZE):
+        batch = image_files[i : i + BATCH_SIZE]
+        print(f"Lote {i//BATCH_SIZE + 1}...")
+        records = process_batch(model, batch, input_folder, depth_out_dir, device, dtype)
+        all_records.extend(records)
+        gc.collect()
 
-    # Guardar CSV
-    csv_output_path = os.path.join(output_folder, "camera_parameters_v2.csv")
-    df = pd.DataFrame(data_records)
-    df.to_csv(csv_output_path, index=False)
-    print(f"Proceso completado. Datos guardados en: {csv_output_path}")
+    df = pd.DataFrame(all_records)
+    csv_path = os.path.join(output_folder, "vggt_camera_data.csv")
+    df.to_csv(csv_path, index=False)
+    print(f"Completado. Datos guardados en: {csv_path}")
 
 if __name__ == "__main__":
-    print("Selecciona la carpeta de entrada (imágenes)...")
-    input_folder = select_folder("Selecciona la carpeta con las imágenes")
-    if not input_folder:
-        print("No se seleccionó carpeta de entrada.")
-        exit()
-        
-    print("Selecciona la carpeta de salida (resultados)...")
-    output_folder = select_folder("Selecciona la carpeta para guardar los resultados")
-    if not output_folder:
-        print("No se seleccionó carpeta de salida.")
-        exit()
-
-    process_images_v2(input_folder, output_folder)
+    in_dir = select_folder("Seleccionar Carpeta Entrada")
+    if in_dir:
+        out_dir = select_folder("Seleccionar Carpeta Salida")
+        if out_dir:
+            process_images_vx(in_dir, out_dir)
