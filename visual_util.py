@@ -142,6 +142,7 @@ def predictions_to_glb(
         pred_world_points_conf = pred_world_points_conf[selected_frame_idx][None]
         images = images[selected_frame_idx][None]
         camera_matrices = camera_matrices[selected_frame_idx][None]
+        alpha_masks = alpha_masks[selected_frame_idx][None]
 
     vertices_3d = pred_world_points.reshape(-1, 3)
     # Handle different image formats - check if images need transposing
