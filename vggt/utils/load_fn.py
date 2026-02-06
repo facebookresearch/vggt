@@ -221,9 +221,9 @@ def load_and_preprocess_images(
                 pad_left = w_padding // 2
                 pad_right = w_padding - pad_left
 
-                # Pad with white (value=1.0)
+                # Pad with white (value=0.0)
                 img = F.pad(
-                    img, (pad_left, pad_right, pad_top, pad_bottom), mode="constant", value=1.0
+                    img, (pad_left, pad_right, pad_top, pad_bottom), mode="constant", value=0.0
                 )
 
         # Handle alpha channel
