@@ -233,8 +233,9 @@ class Aggregator(nn.Module):
         frame_idx = 0
         global_idx = 0
         output_list = []
+        used_by_DPT_idx = [4, 11, 17, 23] 
 
-        for _ in range(self.aa_block_num):
+        for cur_block_num in range(self.aa_block_num):
             for attn_type in self.aa_order:
                 if attn_type == "frame":
                     tokens, frame_idx, frame_intermediates = self._process_frame_attention(
@@ -246,15 +247,18 @@ class Aggregator(nn.Module):
                     )
                 else:
                     raise ValueError(f"Unknown attention type: {attn_type}")
+                
+            # Only save the features that will be used by DPT heads, to save memory for both training and inference
+            if cur_block_num in used_by_DPT_idx:
+                for i in range(len(frame_intermediates)):
+                    # concat frame and global intermediates, [B x S x P x 2C]
+                    concat_inter = torch.cat([frame_intermediates[i], global_intermediates[i]], dim=-1)
+                    output_list.append(concat_inter)
+                    del concat_inter
 
-            for i in range(len(frame_intermediates)):
-                # concat frame and global intermediates, [B x S x P x 2C]
-                concat_inter = torch.cat([frame_intermediates[i], global_intermediates[i]], dim=-1)
-                output_list.append(concat_inter)
-
-        del concat_inter
         del frame_intermediates
         del global_intermediates
+
         return output_list, self.patch_start_idx
 
     def _process_frame_attention(self, tokens, B, S, P, C, frame_idx, pos=None):
