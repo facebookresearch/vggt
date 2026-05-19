@@ -1,4 +1,4 @@
-gradio==5.17.1
+gradio==6.7.0
 viser==0.2.23
 tqdm
 hydra-core
