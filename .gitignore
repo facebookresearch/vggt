@@ -147,3 +147,13 @@ skyseg.onnx
 # pixi environments
 .pixi
 *.egg-info
+
+slurm_outs/
+logs/
+.vscode/
+annotations/
+output_dir/
+constants.py
+wandb/
+/data/
+outputs/

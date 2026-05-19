@@ -1,0 +1,3 @@
+* Build into the config so we can choose between MuM, CroCov2 and DINOv2
+* Add config about how large the model is and try to just train a couple of layers on top of frozen backbone
+* For example one could do 4xA100 for some time and see how it works on MegaDepth

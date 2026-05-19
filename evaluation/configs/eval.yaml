@@ -1,0 +1,55 @@
+# @package _global_
+
+
+name: mv_recon
+work_dir: ${hydra:runtime.cwd}
+output_dir: ${work_dir}/outputs/${name}
+
+hydra:
+  run:
+    dir: ${output_dir}/hydra/${now:%Y-%m-%d_%H-%M-%S}
+
+debug: false
+
+pi3:
+  pretrained_model_name_or_path: yyfz233/Pi3
+  # pretrained_model_name_or_path: checkpoints/Pi3
+
+eval_datasets:
+  # - DTU
+  - ETH3D
+
+no_crop: True
+load_img_size: 518
+
+device: cuda
+
+verbose: False
+
+seed: 42
+
+save_suffix: null
+
+data:
+  DTU:
+    cfg:
+      _target_: evaluation.datasets.dtu.DTU
+      split: test
+      DTU_DIR: /mimer/NOBACKUP/groups/3d-dl/dtu_test_mvsnet_release
+      load_img_size: ${load_img_size}
+      cache_file: data/dataset_cache/dtu_mv_recon_cache.npy
+    sampling:
+      strategy: stride
+      kf_every: 5
+    seq_id_map: evaluation/datasets/seq-id-maps/DTU_mv-recon_seq-id-map-kf5.json
+
+  ETH3D:
+    cfg:
+      _target_: evaluation.datasets.eth3d.ETH3D
+      ETH3D_DIR: /mimer/NOBACKUP/groups/3d-dl/eth3d
+      load_img_size: ${load_img_size}
+      cache_file: data/dataset_cache/eth3d_mv_recon_cache.npy
+    sampling:
+      strategy: stride
+      kf_every: 5
+    seq_id_map: evaluation/datasets/seq-id-maps/ETH3D_mv-recon_seq-id-map-kf5.json

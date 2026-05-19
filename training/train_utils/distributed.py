@@ -15,6 +15,11 @@ def get_machine_local_and_dist_rank():
     """
     local_rank = int(os.environ.get("LOCAL_RANK", None))
     distributed_rank = int(os.environ.get("RANK", None))
+
+    # local_rank = int(os.environ["SLURM_LOCALID"])  # 0-3 on each node
+    # distributed_rank = int(os.environ["SLURM_PROCID"])  
+
+    print('I am local rank', local_rank, 'and distributed rank', distributed_rank)
     assert (
         local_rank is not None and distributed_rank is not None
     ), "Please the set the RANK and LOCAL_RANK environment variables."

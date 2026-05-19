@@ -3,7 +3,7 @@ defaults:
 
 exp_name: exp001
 log_wandb: true
-img_size: 512
+img_size: 336 # 400 # 480 # 512
 num_workers: 8
 seed_value: 42
 accum_steps: 1    # We did not use gradient accumulation in our training, while if you suffer from OOM, you can try to use it.
@@ -68,6 +68,7 @@ data:
           WILDRGBD_DIR: /mimer/NOBACKUP/groups/3d-dl/wildrgbd
           WILDRGBD_ANNOTATION_DIR: /mimer/NOBACKUP/groups/snic2022-6-266/davnords/vggt/annotations
           len_train: 100000
+
         - _target_: data.datasets.co3dv2.Co3dDataset
           split: train
           CO3D_DIR: /mimer/NOBACKUP/groups/3d-dl/co3dv2
@@ -152,7 +153,7 @@ optim:
 
   optimizer:
     _target_: torch.optim.AdamW
-    lr: 2e-4 # 5e-5
+    lr: 1e-4 # 5e-5
     weight_decay: 0.05
 
   frozen_module_names:
@@ -209,9 +210,9 @@ max_epochs: 100
 model:
   _target_: vggt.models.vggt_small.VGGT
   img_size: ${img_size}
-  embed_dim: 1024
+  embed_dim: 768
   depth: 6
-  num_heads: 16
+  num_heads: 12
 
   enable_camera: True
   enable_depth: True

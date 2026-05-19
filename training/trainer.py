@@ -5,6 +5,7 @@
 # LICENSE file in the root directory of this source tree.
 
 import os
+import constants
 
 
 # --- Environment Variable Setup for Performance and Debugging ---
@@ -16,6 +17,8 @@ os.environ["MKL_THREADING_LAYER"] = "GNU"
 os.environ["HYDRA_FULL_ERROR"] = "1"
 # Enables asynchronous error handling for NCCL, which can prevent hangs.
 os.environ["NCCL_ASYNC_ERROR_HANDLING"] = "1"
+
+os.environ['WANDB_API_KEY'] = constants.WANDB_API_KEY
 
 
 import contextlib
@@ -41,7 +44,7 @@ from train_utils.general import *
 from train_utils.logging import setup_logging
 from train_utils.normalization import normalize_camera_extrinsics_and_points_batch
 from train_utils.optimizer import construct_optimizers
-
+import wandb
 
 class Trainer:
     """
@@ -77,6 +80,8 @@ class Trainer:
         loss: Optional[Dict[str, Any]] = None,
         env_variables: Optional[Dict[str, Any]] = None,
         accum_steps: int = 1,
+        log_wandb: bool = False,
+        exp_name: str = "exp001",
         **kwargs,
     ):
         """
@@ -140,6 +145,9 @@ class Trainer:
         set_seeds(seed_value, self.max_epochs, self.distributed_rank)
 
         assert is_dist_avail_and_initialized(), "Torch distributed needs to be initialized before calling the trainer."
+
+        wandb_mode = "online" if log_wandb and self.rank == 0 else "disabled"
+        wandb.init(project="vggt", entity="georgs-team", name=exp_name, reinit=False, mode = wandb_mode)
 
         # Instantiate components (model, loss, etc.)
         self._setup_components()
@@ -376,6 +384,7 @@ class Trainer:
 
     def run_train(self):
         """Runs the main training loop over all epochs."""
+        print('Max epochs: ', self.max_epochs)
         while self.epoch < self.max_epochs:
             set_seeds(self.seed_value + self.epoch * 100, self.max_epochs, self.distributed_rank)
             
@@ -428,9 +437,16 @@ class Trainer:
         loss_meters = {
             name: AverageMeter(name, self.device, ":.4f") for name in loss_names
         }
+
+        iters_per_epoch = len(val_loader)
+        limit_val_batches = (
+            iters_per_epoch
+            if self.limit_val_batches is None
+            else self.limit_val_batches
+        )
         
         progress = ProgressMeter(
-            num_batches=len(val_loader),
+            num_batches=limit_val_batches,
             meters=[
                 batch_time,
                 data_time,
@@ -445,12 +461,6 @@ class Trainer:
         self.model.eval()
         end = time.time()
 
-        iters_per_epoch = len(val_loader)
-        limit_val_batches = (
-            iters_per_epoch
-            if self.limit_val_batches is None
-            else self.limit_val_batches
-        )
 
         for data_iter, batch in enumerate(val_loader):
             if data_iter > limit_val_batches:
@@ -495,6 +505,13 @@ class Trainer:
             if data_iter % self.logging_conf.log_freq == 0:
                 progress.display(data_iter)
 
+        avg_stats = {}
+
+        for name, meter in loss_meters.items():
+            avg_stats[f"{name}_val"] = meter.avg
+
+        wandb.log(avg_stats)
+        print("Validation averages:", avg_stats)
 
         return True
 
@@ -516,8 +533,16 @@ class Trainer:
             loss_meters[f"Grad/{param_names}"] = AverageMeter(f"Grad/{param_names}", self.device, ":.4f")
 
 
+        iters_per_epoch = len(train_loader)
+        limit_train_batches = (
+            iters_per_epoch
+            if self.limit_train_batches is None
+            else self.limit_train_batches
+        )
+        print('Num batches: ', limit_train_batches)
+
         progress = ProgressMeter(
-            num_batches=len(train_loader),
+            num_batches=limit_train_batches,
             meters=[
                 batch_time,
                 data_time,
@@ -531,13 +556,6 @@ class Trainer:
 
         self.model.train()
         end = time.time()
-
-        iters_per_epoch = len(train_loader)
-        limit_train_batches = (
-            iters_per_epoch
-            if self.limit_train_batches is None
-            else self.limit_train_batches
-        )
         
         if self.gradient_clipper is not None:
             # setup gradient clipping at the beginning of training
@@ -581,9 +599,14 @@ class Trainer:
                 logging.warning(
                     f"Skipping scheduler update since the training is at the end, i.e, {self.where} of [0,1]."
                 )
-                    
-            # Log schedulers
+
+            #         
+
+
+            # Log schedulers (to W&B instead of TensorBoard)
             if self.steps[phase] % self.logging_conf.log_freq == 0:
+                wandb_dict = {}
+
                 for i, optim in enumerate(self.optims):
                     for j, param_group in enumerate(optim.optimizer.param_groups):
                         for option in optim.schedulers[j]:
@@ -596,16 +619,13 @@ class Trainer:
                                     else ""
                                 )
                             )
-                            self.tb_writer.log(
-                                os.path.join("Optim", f"{optim_prefix}", option),
-                                param_group[option],
-                                self.steps[phase],
-                            )
-                self.tb_writer.log(
-                    os.path.join("Optim", "where"),
-                    self.where,
-                    self.steps[phase],
-                )
+                            key = f"Optim/{optim_prefix}{option}"
+                            wandb_dict[key] = param_group.get(option, None)
+
+                # Also log the scheduler position (e.g., training progress)
+                wandb_dict["Optim/where"] = self.where
+
+                wandb.log(wandb_dict, step=self.steps[phase])
 
             # Clipping gradients and detecting diverging gradients
             if self.gradient_clipper is not None:
@@ -632,6 +652,9 @@ class Trainer:
 
             if data_iter % self.logging_conf.log_freq == 0:
                 progress.display(data_iter)
+                wandb.log({
+                    **{name: meter.avg for name, meter in loss_meters.items()}
+                })
 
         return True
 

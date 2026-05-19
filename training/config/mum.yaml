@@ -1,0 +1,6 @@
+defaults:
+  - default
+  - _self_
+exp_name: mum_exp005
+model:
+  patch_embed: mum

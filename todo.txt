@@ -1,0 +1,18 @@
+Klara (genererar snygga ply plots):
+* MegaDepth
+* VKITTI
+* BlendedMVS
+* PointOdyssey
+* ScanNet
+* Hypersim
+
+
+Datsets
+- [x] MegaDepth
+- [x] ScanNet
+- [x] VKITTI
+- [ ] CO3D (downloading)
+- [ ] BlendedMVS (downloading)
+- [ ] WildRGB
+- [ ] PointOdyssey
+- [ ] MVS-Synth

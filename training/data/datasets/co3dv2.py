@@ -1,3 +1,8 @@
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+# All rights reserved.
+#
+# This source code is licensed under the license found in the
+# LICENSE file in the root directory of this source tree.
 
 import gzip
 import json
@@ -8,28 +13,51 @@ import logging
 import cv2
 import random
 import numpy as np
-import h5py
+
 
 from data.dataset_util import *
 from data.base_dataset import BaseDataset
 
-import numpy as np
-import torch
-import cv2
+# TV 
+# donut
+# frisbee
+# toybus
+# bowl
+# book
+# car
+# toaster
+# hydrant
+# keyboard
+# parkingmeter
+# hotdog
+# handbag
+# motorcycle
+# pizza
+# teddybear
+# remote
+# backpack
+# cellphone
+# bench
+# stopsign
 
 
-def _load_16big_png_depth(depth_png):
-    with Image.open(depth_png) as depth_pil:
-        # the image is stored with 16-bit depth but PIL reads it as I (32 bit).
-        # we cast it to uint16, then reinterpret as float16, then cast to float32
-        depth = (
-            np.frombuffer(np.array(depth_pil, dtype=np.uint16), dtype=np.float16)
-            .astype(np.float32)
-            .reshape((depth_pil.size[1], depth_pil.size[0]))
-        )
-    return depth
+SEEN_CATEGORIES = [
+    "apple",
+    "bowl",
+    "book",
+    "car",
+    "donut",
+    "hydrant",
+    "keyboard",
+    "parkingmeter",
+    "toaster",
+    "toybus",
+    "tv",
+    "frisbee",
+]
 
-class CO3DDataset(BaseDataset):
+
+class Co3dDataset(BaseDataset):
     def __init__(
         self,
         common_conf,
@@ -41,7 +69,7 @@ class CO3DDataset(BaseDataset):
         len_test: int = 10000,
     ):
         """
-        Initialize the CO3DDataset.
+        Initialize the Co3dDataset.
 
         Args:
             common_conf: Configuration object with common settings.
@@ -66,11 +94,18 @@ class CO3DDataset(BaseDataset):
         if CO3D_DIR is None or CO3D_ANNOTATION_DIR is None:
             raise ValueError("Both CO3D_DIR and CO3D_ANNOTATION_DIR must be specified.")
 
+
+        # category = sorted(SEEN_CATEGORIES)
+        category = sorted(os.listdir(CO3D_DIR))
+
+        if self.debug:
+            category = ["apple"]
+
         if split == "train":
-            split_name = "train.jgz"
+            split_name_list = ["train"]
             self.len_train = len_train
         elif split == "test":
-            split_name = "test.jgz"
+            split_name_list = ["test"]
             self.len_train = len_test
         else:
             raise ValueError(f"Invalid split: {split}")
@@ -88,32 +123,36 @@ class CO3DDataset(BaseDataset):
         self.CO3D_DIR = CO3D_DIR
         self.CO3D_ANNOTATION_DIR = CO3D_ANNOTATION_DIR
 
-        annotation_file = osp.join(
-            self.CO3D_ANNOTATION_DIR, "co3d", split_name
-        )
-
-        try:
-            with gzip.open(annotation_file, "r") as fin:
-                annotation = json.loads(fin.read())
-        except FileNotFoundError:
-            logging.error(f"Annotation file not found: {annotation_file}")
         total_frame_num = 0
 
-        for seq_name, seq_data in annotation.items():
-            if seq_name in self.invalid_sequence:
-                continue
+        for c in category:
+            for split_name in split_name_list:
+                annotation_file = osp.join(
+                    self.CO3D_ANNOTATION_DIR, f"{c}_{split_name}.jgz"
+                )
 
-            if len(seq_data) < min_num_images:
-                continue
-            total_frame_num += len(seq_data)
-            self.data_store[seq_name] = seq_data
+                try:
+                    with gzip.open(annotation_file, "r") as fin:
+                        annotation = json.loads(fin.read())
+                except FileNotFoundError:
+                    logging.error(f"Annotation file not found: {annotation_file}")
+                    continue
+
+                for seq_name, seq_data in annotation.items():
+                    if len(seq_data) < min_num_images:
+                        continue
+                    if seq_name in self.invalid_sequence:
+                        continue
+                    total_frame_num += len(seq_data)
+                    self.data_store[seq_name] = seq_data
+
         self.sequence_list = list(self.data_store.keys())
         self.sequence_list_len = len(self.sequence_list)
         self.total_frame_num = total_frame_num
 
         status = "Training" if self.training else "Testing"
-        logging.info(f"{status}: CO3D Data size: {self.sequence_list_len}")
-        logging.info(f"{status}: CO3D Data dataset length: {len(self)}")
+        logging.info(f"{status}: Co3D Data size: {self.sequence_list_len}")
+        logging.info(f"{status}: Co3D Data dataset length: {len(self)}")
 
     def get_data(
         self,
@@ -172,12 +211,14 @@ class CO3DDataset(BaseDataset):
             if self.load_depth:
                 depth_path = image_path.replace("/images", "/depths") + ".geometric.png"
                 depth_map = read_depth(depth_path, 1.0)
-                
-                # mvs_mask_path = image_path.replace(
-                #     "/images", "/depth_masks"
-                # ).replace(".jpg", ".png")
-                # mvs_mask = cv2.imread(mvs_mask_path, cv2.IMREAD_GRAYSCALE) > 128
-                # depth_map[~mvs_mask] = 0
+
+                mvs_mask_path = image_path.replace(
+                    "/images", "/depth_masks"
+                ).replace(".jpg", ".png")
+                mvs_mask = cv2.imread(mvs_mask_path, cv2.IMREAD_GRAYSCALE)
+                if mvs_mask is not None:
+                    mvs_mask =  mvs_mask> 128
+                    depth_map[~mvs_mask] = 0
 
                 depth_map = threshold_depth_map(
                     depth_map, min_percentile=-1, max_percentile=98
@@ -218,7 +259,7 @@ class CO3DDataset(BaseDataset):
             image_paths.append(image_path)
             original_sizes.append(original_size)
 
-        set_name = "CO3D"
+        set_name = "co3d"
 
         batch = {
             "seq_name": set_name + "_" + seq_name,
