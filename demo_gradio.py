@@ -49,8 +49,6 @@ def run_model(target_dir, model) -> dict:
 
     # Device check
     device = "cuda" if torch.cuda.is_available() else "cpu"
-    if not torch.cuda.is_available():
-        raise ValueError("CUDA is not available. Check your environment.")
 
     # Move model to device
     model = model.to(device)
@@ -68,10 +66,16 @@ def run_model(target_dir, model) -> dict:
 
     # Run inference
     print("Running inference...")
-    dtype = torch.bfloat16 if torch.cuda.get_device_capability()[0] >= 8 else torch.float16
+    if device == "cuda":
+        dtype = torch.bfloat16 if torch.cuda.get_device_capability()[0] >= 8 else torch.float16
+    else:
+        dtype = torch.float32
 
     with torch.no_grad():
-        with torch.cuda.amp.autocast(dtype=dtype):
+        if device == "cuda":
+            with torch.cuda.amp.autocast(dtype=dtype):
+                predictions = model(images)
+        else:
             predictions = model(images)
 
     # Convert pose encoding to extrinsic and intrinsic matrices

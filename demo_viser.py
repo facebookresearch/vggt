@@ -359,8 +359,11 @@ def main():
     images = load_and_preprocess_images(image_names).to(device)
     print(f"Preprocessed images shape: {images.shape}")
 
-    print("Running inference...")
-    dtype = torch.bfloat16 if torch.cuda.get_device_capability()[0] >= 8 else torch.float16
+    print("Running inference...")    
+    if torch.cuda.is_available():
+        dtype = torch.bfloat16 if torch.cuda.get_device_capability()[0] >= 8 else torch.float16
+    else:
+        dtype = torch.float32
 
     with torch.no_grad():
         with torch.cuda.amp.autocast(dtype=dtype):
