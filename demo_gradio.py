@@ -326,6 +326,15 @@ def update_visualization(
     return glbfile, "Updating Visualization"
 
 
+def check_target_dir(target_dir):
+    """
+    Check if the target_dir exists.
+    """
+    if not os.path.isdir(target_dir):
+        return "None"
+    return target_dir
+
+
 # -------------------------------------------------------------------------
 # Example images
 # -------------------------------------------------------------------------
@@ -461,6 +470,7 @@ with gr.Blocks(
                     [input_video, input_images, reconstruction_output, log_output, target_dir_output, image_gallery],
                     scale=1,
                 )
+                reload_btn = gr.Button("Reload", scale=1, variant="secondary")
 
             with gr.Row():
                 prediction_mode = gr.Radio(
@@ -469,6 +479,14 @@ with gr.Blocks(
                     value="Depthmap and Camera Branch",
                     scale=1,
                     elem_id="my_radio",
+                )
+
+            with gr.Row():
+                gr.Interface(
+                    fn=check_target_dir,
+                    inputs=[gr.Textbox(label="Input Existing target_dir", value="/path/to/target_dir")],
+                    outputs=[target_dir_output],
+                    flagging_mode="never",
                 )
 
             with gr.Row():
@@ -563,6 +581,45 @@ with gr.Blocks(
         outputs=[reconstruction_output, log_output, frame_filter],
     ).then(
         fn=lambda: "False", inputs=[], outputs=[is_example]  # set is_example to "False"
+    )
+
+    # -------------------------------------------------------------------------
+    # "Reload" button logic:
+    #  - Clear fields
+    #  - Check prediction
+    #  - Then update visualization
+    # -------------------------------------------------------------------------
+    def check_prediction(target_dir):
+        if not os.path.exists(target_dir):
+            is_example = "True"
+            return "None", is_example
+        else:
+            is_example = "False"
+            return target_dir, is_example
+
+    reload_btn.click(fn=clear_fields, inputs=[], outputs=[]).then(
+        fn=update_log, inputs=[], outputs=[log_output]
+    ).then(
+        fn=check_prediction,
+        inputs=[target_dir_output],
+        outputs=[
+                    target_dir_output,
+                    is_example,
+                ]
+    ).then(
+        update_visualization,
+        inputs=[
+                    target_dir_output,
+                    conf_thres,
+                    frame_filter,
+                    mask_black_bg,
+                    mask_white_bg,
+                    show_cam,
+                    mask_sky,
+                    prediction_mode,
+                    is_example,
+        ],
+        outputs=[reconstruction_output, log_output],
     )
 
     # -------------------------------------------------------------------------
