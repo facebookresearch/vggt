@@ -289,9 +289,9 @@ def predict_tracks_in_chunks(
         fine_pred_track, _, pred_vis, pred_score = track_predictor(
             images_feed, split_points, fmaps=fmaps_feed, fine_tracking=fine_tracking, fine_chunk=fine_chunk
         )
-        fine_pred_track_list.append(fine_pred_track)
-        pred_vis_list.append(pred_vis)
-        pred_score_list.append(pred_score)
+        fine_pred_track_list.append(fine_pred_track.detach() if fine_pred_track is not None else None)
+        pred_vis_list.append(pred_vis.detach() if pred_vis is not None else None)
+        pred_score_list.append(pred_score.detach() if pred_score is not None else None)
 
     # Concatenate the results from all splits
     fine_pred_track = torch.cat(fine_pred_track_list, dim=2)

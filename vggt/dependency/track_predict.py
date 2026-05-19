@@ -78,7 +78,7 @@ def predict_tracks(
 
     if fine_tracking:
         print("For faster inference, consider disabling fine_tracking")
-
+    
     for query_index in query_frame_indexes:
         print(f"Predicting tracks for query frame {query_index}")
         pred_track, pred_vis, pred_conf, pred_point_3d, pred_color = _forward_on_query(
@@ -301,7 +301,8 @@ def _augment_non_visible_frames(
         last_query = non_vis_frames[0]
 
         # Run the tracker for every selected frame
-        for query_index in query_frame_list:
+        for i, query_index in enumerate(query_frame_list):
+            print (f"Predicting tracks for query frame {query_index} (attempt {i+1})")
             new_track, new_vis, new_conf, new_point_3d, new_color = _forward_on_query(
                 query_index,
                 images,
