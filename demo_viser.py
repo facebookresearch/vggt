@@ -344,12 +344,12 @@ def main():
     print("Initializing and loading VGGT model...")
     # model = VGGT.from_pretrained("facebook/VGGT-1B")
 
-    model = VGGT()
+    model = VGGT().to(device)
     _URL = "https://huggingface.co/facebook/VGGT-1B/resolve/main/model.pt"
-    model.load_state_dict(torch.hub.load_state_dict_from_url(_URL))
-
+    state_dict = torch.hub.load_state_dict_from_url(_URL, map_location=device)
+    model.load_state_dict(state_dict)
     model.eval()
-    model = model.to(device)
+    print(f"Model loaded to {device}")
 
     # Use the provided image folder path
     print(f"Loading images from {args.image_folder}...")
