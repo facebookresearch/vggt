@@ -278,11 +278,14 @@ def rename_colmap_recons_and_rescale_camera(
             pycamera.height = real_image_size[1]
 
         if shift_point2d_to_original_res:
-            # Also shift the point2D to original resolution
-            top_left = original_coords[pyimageid - 1, :2]
+            x1, y1, x2, y2, w, h = original_coords[pyimageid - 1]
+            if x1 == 0:
+                shift = np.array([x1, y1]) * (w / x2)
+            else:
+                shift = np.array([x1, y1]) * (h / y2)
 
             for point2D in pyimage.points2D:
-                point2D.xy = (point2D.xy - top_left) * resize_ratio
+                point2D.xy = point2D.xy * resize_ratio - shift
 
         if shared_camera:
             # If shared_camera, all images share the same camera

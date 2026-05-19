@@ -5,14 +5,13 @@
 # LICENSE file in the root directory of this source tree.
 
 import logging
+import math
 import warnings
-from typing import Dict, List, Optional, Tuple, Union
 
-import numpy as np
-import pycolmap
 import torch
 import torch.nn.functional as F
 from lightglue import ALIKED, SIFT, SuperPoint
+from torch.nn import DataParallel
 
 from .vggsfm_tracker import TrackerPredictor
 
@@ -95,17 +94,19 @@ def generate_rank_by_dino(
         frame_feat_norm = F.normalize(frame_feat, p=2, dim=1)
         similarity_matrix = torch.mm(frame_feat_norm, frame_feat_norm.transpose(-1, -2))
 
-    distance_matrix = 100 - similarity_matrix.clone()
+    with torch.amp.autocast("cuda", enabled=False):
+        similarity_matrix = similarity_matrix.float()
+        distance_matrix = 100 - similarity_matrix
 
-    # Ignore self-pairing
-    similarity_matrix.fill_diagonal_(-100)
-    similarity_sum = similarity_matrix.sum(dim=1)
+        # Ignore self-pairing
+        similarity_matrix.fill_diagonal_(-100)
+        similarity_sum = similarity_matrix.sum(dim=1)
 
-    # Find the most common frame
-    most_common_frame_index = torch.argmax(similarity_sum).item()
+        # Find the most common frame
+        most_common_frame_index = torch.argmax(similarity_sum).item()
 
-    # Conduct FPS sampling starting from the most common frame
-    fps_idx = farthest_point_sampling(distance_matrix, query_frame_num, most_common_frame_index)
+        # Conduct FPS sampling starting from the most common frame
+        fps_idx = farthest_point_sampling(distance_matrix, query_frame_num, most_common_frame_index)
 
     # Clean up all tensors and models to free memory
     del frame_feat, frame_feat_norm, similarity_matrix, distance_matrix
@@ -253,7 +254,7 @@ def extract_keypoints(query_image, extractors, round_keypoints=True):
 
 
 def predict_tracks_in_chunks(
-    track_predictor, images_feed, query_points_list, fmaps_feed, fine_tracking, num_splits=None, fine_chunk=40960
+    track_predictor, images_feed, query_points_list, fmaps_feed, fine_tracking, num_splits=None, fine_chunk=40960, parallel=True,
 ):
     """
     Process a list of query points to avoid memory issues.
@@ -265,6 +266,7 @@ def predict_tracks_in_chunks(
         fmaps_feed (torch.Tensor): A tensor of feature maps for the tracker.
         fine_tracking (bool): Whether to perform fine tracking.
         num_splits (int, optional): Ignored when query_points_list is provided. Kept for backward compatibility.
+        parallel: Using multiple GPUs to speed up predicting tracks. Default is True.
 
     Returns:
         tuple: A tuple containing the concatenated predicted tracks, visibility, and scores.
@@ -284,11 +286,30 @@ def predict_tracks_in_chunks(
     pred_vis_list = []
     pred_score_list = []
 
+    track_predictor = DataParallel(track_predictor) if parallel else track_predictor
+
     for split_points in query_points_list:
         # Feed into track predictor for each split
+        if parallel:
+            gpu_count = torch.cuda.device_count()
+            points_num = split_points.shape[1]
+            batch_points_num = math.ceil(points_num / gpu_count)
+            padding_num = batch_points_num * gpu_count - points_num
+            mask = torch.arange(batch_points_num * gpu_count) < points_num
+            split_points = F.pad(split_points, pad=(0, 0, 0, padding_num))
+            split_points = split_points.reshape(gpu_count, batch_points_num, -1)
+            images_feed = images_feed.expand(gpu_count, *images_feed.shape[1:])
+            fmaps_feed = fmaps_feed.expand(gpu_count, *fmaps_feed.shape[1:])
+
         fine_pred_track, _, pred_vis, pred_score = track_predictor(
             images_feed, split_points, fmaps=fmaps_feed, fine_tracking=fine_tracking, fine_chunk=fine_chunk
         )
+
+        if parallel:
+            B, S, N, D = fine_pred_track.shape
+            fine_pred_track = fine_pred_track.permute(1, 0, 2, 3).reshape(1, S, -1, D)[:, :, mask, :]
+            pred_vis = pred_vis.permute(1, 0, 2).reshape(1, S, -1)[:, :, mask]
+
         fine_pred_track_list.append(fine_pred_track)
         pred_vis_list.append(pred_vis)
         pred_score_list.append(pred_score)

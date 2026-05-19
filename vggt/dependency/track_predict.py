@@ -4,13 +4,16 @@
 # This source code is licensed under the license found in the
 # LICENSE file in the root directory of this source tree.
 
-import torch
+import math
 import numpy as np
 from .vggsfm_utils import *
+from .projection import project_3D_points_np
 
 
 def predict_tracks(
     images,
+    extrinsics,
+    intrinsics,
     conf=None,
     points_3d=None,
     masks=None,
@@ -20,6 +23,9 @@ def predict_tracks(
     max_points_num=163840,
     fine_tracking=True,
     complete_non_vis=True,
+    track_vis_thresh=0.1,
+    reproj_error_thresh=8,
+    min_inlier_per_frame=64
 ):
     """
     Predict tracks for the given images and masks.
@@ -33,6 +39,8 @@ def predict_tracks(
 
     Args:
         images: Tensor of shape [S, 3, H, W] containing the input images.
+        extrinsics: Array of shape [S, 3, 4] containing the extrinsic parameters for each frame.
+        intrinsics: Array of shape [S, 3, 3] containing the intrinsic parameters for each frame.
         conf: Tensor of shape [S, 1, H, W] containing the confidence scores. Default is None.
         points_3d: Tensor containing 3D points. Default is None.
         masks: Optional tensor of shape [S, 1, H, W] containing masks. Default is None.
@@ -42,6 +50,9 @@ def predict_tracks(
         max_points_num: Maximum number of points to process at once. Default is 163840.
         fine_tracking: Whether to use fine tracking. Default is True.
         complete_non_vis: Whether to augment non-visible frames. Default is True.
+        track_vis_thresh: Visibility threshold for track filtering
+        reproj_error_thresh: Reprojection error threshold for track filtering
+        min_inlier_per_frame: Minimum number of inliers per frame
 
     Returns:
         pred_tracks: Numpy array containing the predicted tracks.
@@ -108,6 +119,8 @@ def predict_tracks(
             pred_points_3d,
             pred_colors,
             images,
+            extrinsics,
+            intrinsics,
             conf,
             points_3d,
             fmaps_for_tracker,
@@ -115,9 +128,10 @@ def predict_tracks(
             tracker,
             max_points_num,
             fine_tracking,
-            min_vis=500,
-            non_vis_thresh=0.1,
-            device=device,
+            track_vis_thresh=track_vis_thresh,
+            reproj_error_thresh=reproj_error_thresh,
+            min_inlier_per_frame=min_inlier_per_frame,
+            device=device
         )
 
     pred_tracks = np.concatenate(pred_tracks, axis=1)
@@ -209,16 +223,17 @@ def _forward_on_query(
     fmaps_feed = fmaps_feed[None]  # add batch dimension
 
     all_points_num = images_feed.shape[1] * query_points.shape[1]
+    gpu_count = torch.cuda.device_count()
+    gpu_points_num = math.ceil(all_points_num / gpu_count)
 
-    # Don't need to be scared, this is just chunking to make GPU happy
-    if all_points_num > max_points_num:
-        num_splits = (all_points_num + max_points_num - 1) // max_points_num
-        query_points = torch.chunk(query_points, num_splits, dim=1)
-    else:
+    if gpu_points_num <= max_points_num:
         query_points = [query_points]
+    else:
+        chunk_num = math.ceil(all_points_num / (max_points_num * gpu_count))
+        query_points = torch.chunk(query_points, chunk_num, dim=1)
 
     pred_track, pred_vis, _ = predict_tracks_in_chunks(
-        tracker, images_feed, query_points, fmaps_feed, fine_tracking=fine_tracking
+        tracker, images_feed, query_points, fmaps_feed, fine_tracking=fine_tracking, parallel=gpu_count > 1
     )
 
     pred_track, pred_vis = switch_tensor_order([pred_track, pred_vis], reorder_index, dim=1)
@@ -236,6 +251,8 @@ def _augment_non_visible_frames(
     pred_points_3d: list,  # ← running list of np.ndarrays for 3D points
     pred_colors: list,  # ← running list of np.ndarrays for colors
     images: torch.Tensor,
+    extrinsics,
+    intrinsics,
     conf,
     points_3d,
     fmaps_for_tracker,
@@ -243,9 +260,9 @@ def _augment_non_visible_frames(
     tracker,
     max_points_num: int,
     fine_tracking: bool,
-    *,
-    min_vis: int = 500,
-    non_vis_thresh: float = 0.1,
+    track_vis_thresh: float = 0.1,
+    reproj_error_thresh: float = 8.0,
+    min_inlier_per_frame: int = 64,
     device: torch.device = None,
 ):
     """
@@ -258,6 +275,8 @@ def _augment_non_visible_frames(
         pred_points_3d: List of numpy arrays containing 3D points.
         pred_colors: List of numpy arrays containing point colors.
         images: Tensor of shape [S, 3, H, W] containing the input images.
+        extrinsics: Array of shape [S, 3, 4] containing the extrinsic parameters for each frame.
+        intrinsics: Array of shape [S, 3, 3] containing the intrinsic parameters for each frame.
         conf: Tensor of shape [S, 1, H, W] containing confidence scores
         points_3d: Tensor containing 3D points
         fmaps_for_tracker: Feature maps for the tracker
@@ -265,8 +284,9 @@ def _augment_non_visible_frames(
         tracker: VGG-SFM tracker
         max_points_num: Maximum number of points to process at once
         fine_tracking: Whether to use fine tracking
-        min_vis: Minimum visibility threshold
-        non_vis_thresh: Non-visibility threshold
+        track_vis_thresh: Visibility threshold for tracks filtering
+        reproj_error_thresh: Reprojection error threshold for track filtering
+        min_inlier_per_frame: Minimum number of inliers per frame
         device: Device to use for computation
 
     Returns:
@@ -277,28 +297,31 @@ def _augment_non_visible_frames(
     cur_extractors = keypoint_extractors  # may be replaced on the final trial
 
     while True:
-        # Visibility per frame
-        vis_array = np.concatenate(pred_vis_scores, axis=1)
-
         # Count frames with sufficient visibility using numpy
-        sufficient_vis_count = (vis_array > non_vis_thresh).sum(axis=-1)
-        non_vis_frames = np.where(sufficient_vis_count < min_vis)[0].tolist()
+        vis_mask = np.concatenate(pred_vis_scores, axis=-1) > track_vis_thresh
 
-        if len(non_vis_frames) == 0:
+        projected_points_2d, projected_points_cam = project_3D_points_np(np.concatenate(pred_points_3d, axis=0), extrinsics, intrinsics)
+        projected_points_2d[projected_points_cam[:, -1] <= 0] = 1e6
+        projected_diff = np.linalg.norm(projected_points_2d - np.concatenate(pred_tracks, axis=1), axis=-1)
+        reproj_mask = projected_diff < reproj_error_thresh
+        mask = np.logical_and(vis_mask, reproj_mask)
+        non_inlier_frames = np.where(mask.sum(axis=1) < min_inlier_per_frame)[0].tolist()
+
+        if len(non_inlier_frames) == 0:
             break
 
-        print("Processing non visible frames:", non_vis_frames)
+        print("Processing non enough inlier frames:", non_inlier_frames)
 
         # Decide the frames & extractor for this round
-        if non_vis_frames[0] == last_query:
+        if non_inlier_frames[0] == last_query:
             # Same frame failed twice - final "all-in" attempt
             final_trial = True
             cur_extractors = initialize_feature_extractors(2048, extractor_method="sp+sift+aliked", device=device)
-            query_frame_list = non_vis_frames  # blast them all at once
+            query_frame_list = non_inlier_frames  # blast them all at once
         else:
-            query_frame_list = [non_vis_frames[0]]  # Process one at a time
+            query_frame_list = [non_inlier_frames[0]]  # Process one at a time
 
-        last_query = non_vis_frames[0]
+        last_query = non_inlier_frames[0]
 
         # Run the tracker for every selected frame
         for query_index in query_frame_list:
