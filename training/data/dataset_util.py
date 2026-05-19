@@ -400,8 +400,8 @@ def depth_to_cam_coords_points(
     u, v = np.meshgrid(np.arange(W), np.arange(H))
     
     # Unproject to camera coordinates
-    x_cam = (u - cu) * depth_map / fu
-    y_cam = (v - cv) * depth_map / fv
+    x_cam = (u - cu + .5) * depth_map / fu
+    y_cam = (v - cv + .5) * depth_map / fv
     z_cam = depth_map
 
     # Stack to form camera coordinates
