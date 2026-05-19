@@ -1,7 +1,7 @@
 [project]
 authors = [{name = "Jianyuan Wang", email = "jianyuan@robots.ox.ac.uk"}]
 dependencies = [
-    "numpy<2",
+    "numpy>=2",
     "Pillow",
     "huggingface_hub",
     "einops",
