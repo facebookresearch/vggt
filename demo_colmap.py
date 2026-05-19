@@ -129,8 +129,15 @@ def demo_fn(args):
     vggt_fixed_resolution = 518
     img_load_resolution = 1024
 
-    images, original_coords = load_and_preprocess_images_square(image_path_list, img_load_resolution)
+    images, alpha_masks, original_coords = load_and_preprocess_images_square(image_path_list, img_load_resolution)
     images = images.to(device)
+    alpha_masks = F.interpolate(
+        alpha_masks,
+        size=(vggt_fixed_resolution, vggt_fixed_resolution),
+        mode="bilinear",
+        align_corners=False,
+    ).squeeze(1)
+    alpha_masks = alpha_masks.cpu().numpy()
     original_coords = original_coords.to(device)
     print(f"Loaded {len(images)} images from {image_dir}")
 
@@ -209,7 +216,8 @@ def demo_fn(args):
         # (S, H, W, 3), with x, y coordinates and frame indices
         points_xyf = create_pixel_coordinate_grid(num_frames, height, width)
 
-        conf_mask = depth_conf >= conf_thres_value
+        # mask out points with low confidence and transparent pixels
+        conf_mask = (depth_conf >= conf_thres_value) & (alpha_masks > 0.5)
         # at most writing 100000 3d points to colmap reconstruction object
         conf_mask = randomly_limit_trues(conf_mask, max_points_for_colmap)
 

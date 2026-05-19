@@ -3,14 +3,23 @@
 #
 # This source code is licensed under the license found in the
 # LICENSE file in the root directory of this source tree.
+from typing import Literal
 
 import torch
+import torch.nn.functional as F
 from PIL import Image
 from torchvision import transforms as TF
 import numpy as np
 
 
-def load_and_preprocess_images_square(image_path_list, target_size=1024):
+_IMAGENET_MEAN: tuple[float, float, float] = (0.485, 0.456, 0.406)
+
+
+def load_and_preprocess_images_square(
+    image_path_list: list[str],
+    target_size: int = 1024,
+    background_color: Literal["white", "black", "imagenet_mean"]="white",
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """
     Load and preprocess images by center padding to square and resizing to target size.
     Also returns the position information of original pixels after transformation.
@@ -18,11 +27,14 @@ def load_and_preprocess_images_square(image_path_list, target_size=1024):
     Args:
         image_path_list (list): List of paths to image files
         target_size (int, optional): Target size for both width and height. Defaults to 518.
+        background_color (str, optional): Background color for transparent images to blend onto,
+            either "white", "black" or "imagenet_mean". Defaults to "white".
 
     Returns:
         tuple: (
             torch.Tensor: Batched tensor of preprocessed images with shape (N, 3, target_size, target_size),
-            torch.Tensor: Array of shape (N, 5) containing [x1, y1, x2, y2, width, height] for each image
+            torch.Tensor: Batched tensor of alpha masks with shape (N, 1, H, W),
+            torch.Tensor: Array of shape (N, 5) containing [x1, y1, x2, y2, width, height] for each image.
         )
 
     Raises:
@@ -32,21 +44,20 @@ def load_and_preprocess_images_square(image_path_list, target_size=1024):
     if len(image_path_list) == 0:
         raise ValueError("At least 1 image is required")
 
+    bg_map = {
+        "black": (0.0, 0.0, 0.0),
+        "white": (1.0, 1.0, 1.0),
+        "imagenet_mean": _IMAGENET_MEAN,
+    }
+
     images = []
+    masks = []
     original_coords = []  # Renamed from position_info to be more descriptive
     to_tensor = TF.ToTensor()
 
     for image_path in image_path_list:
         # Open image
         img = Image.open(image_path)
-
-        # If there's an alpha channel, blend onto white background
-        if img.mode == "RGBA":
-            background = Image.new("RGBA", img.size, (255, 255, 255, 255))
-            img = Image.alpha_composite(background, img)
-
-        # Convert to RGB
-        img = img.convert("RGB")
 
         # Get original dimensions
         width, height = img.size
@@ -70,19 +81,37 @@ def load_and_preprocess_images_square(image_path_list, target_size=1024):
         # Store original image coordinates and scale
         original_coords.append(np.array([x1, y1, x2, y2, width, height]))
 
+        # Convert to tensor
+        img_tensor = to_tensor(img)
+
         # Create a new black square image and paste original
-        square_img = Image.new("RGB", (max_dim, max_dim), (0, 0, 0))
-        square_img.paste(img, (left, top))
+        square_tensor = img_tensor.new_zeros(img_tensor.shape[0], max_dim, max_dim)
+        square_tensor[:, top : top + height, left : left + width] = img_tensor
 
         # Resize to target size
-        square_img = square_img.resize((target_size, target_size), Image.Resampling.BICUBIC)
+        square_tensor = F.interpolate(
+            square_tensor.unsqueeze(0),
+            size=(target_size, target_size),
+            mode="bilinear",
+            align_corners=False,
+        ).squeeze(0)
 
-        # Convert to tensor
-        img_tensor = to_tensor(square_img)
-        images.append(img_tensor)
+        # Handle alpha channel
+        if square_tensor.shape[0] == 4:
+            mask = square_tensor[3]
+            square_tensor = square_tensor[:3]
+            bg_col = bg_map.get(background_color, (1.0, 1.0, 1.0))
+            bg = square_tensor.new_tensor(bg_col).view(3, 1, 1)
+            square_tensor = square_tensor * mask + bg * (1 - mask)
+        else:
+            mask = torch.ones_like(square_tensor[0])
+
+        images.append(square_tensor)
+        masks.append(mask.unsqueeze(0))
 
     # Stack all images
     images = torch.stack(images)
+    masks = torch.stack(masks)
     original_coords = torch.from_numpy(np.array(original_coords)).float()
 
     # Add additional dimension if single image to ensure correct shape
@@ -91,10 +120,17 @@ def load_and_preprocess_images_square(image_path_list, target_size=1024):
             images = images.unsqueeze(0)
             original_coords = original_coords.unsqueeze(0)
 
-    return images, original_coords
+        if masks.dim() == 3:
+            masks = masks.unsqueeze(0)
+
+    return images, masks, original_coords
 
 
-def load_and_preprocess_images(image_path_list, mode="crop"):
+def load_and_preprocess_images(
+    image_path_list: list[str],
+    mode: Literal["crop", "pad"]="crop",
+    background_color: Literal["white", "black", "imagenet_mean"]="white",
+) -> tuple[torch.Tensor, torch.Tensor]:
     """
     A quick start function to load and preprocess images for model input.
     This assumes the images should have the same shape for easier batching, but our model can also work well with different shapes.
@@ -105,9 +141,13 @@ def load_and_preprocess_images(image_path_list, mode="crop"):
                              - "crop" (default): Sets width to 518px and center crops height if needed.
                              - "pad": Preserves all pixels by making the largest dimension 518px
                                and padding the smaller dimension to reach a square shape.
+        background_color (str, optional): Background color for transparent images to blend onto,
+            either "white", "black" or "imagenet_mean". Defaults to "white".
 
     Returns:
-        torch.Tensor: Batched tensor of preprocessed images with shape (N, 3, H, W)
+        tuple[torch.Tensor, torch.Tensor]: Two element tuple containing:
+            Batched tensor of preprocessed images with shape (N, 3, H, W).
+            Batched tensor of alpha masks with shape (N, 1, H, W).
 
     Raises:
         ValueError: If the input list is empty or if mode is invalid
@@ -129,7 +169,14 @@ def load_and_preprocess_images(image_path_list, mode="crop"):
     if mode not in ["crop", "pad"]:
         raise ValueError("Mode must be either 'crop' or 'pad'")
 
+    bg_map = {
+        "black": (0.0, 0.0, 0.0),
+        "white": (1.0, 1.0, 1.0),
+        "imagenet_mean": _IMAGENET_MEAN,
+    }
+
     images = []
+    masks = []
     shapes = set()
     to_tensor = TF.ToTensor()
     target_size = 518
@@ -138,17 +185,6 @@ def load_and_preprocess_images(image_path_list, mode="crop"):
     for image_path in image_path_list:
         # Open image
         img = Image.open(image_path)
-
-        # If there's an alpha channel, blend onto white background:
-        if img.mode == "RGBA":
-            # Create white background
-            background = Image.new("RGBA", img.size, (255, 255, 255, 255))
-            # Alpha composite onto the white background
-            img = Image.alpha_composite(background, img)
-
-        # Now convert to "RGB" (this step assigns white for transparent areas)
-        img = img.convert("RGB")
-
         width, height = img.size
 
         if mode == "pad":
@@ -185,13 +221,24 @@ def load_and_preprocess_images(image_path_list, mode="crop"):
                 pad_left = w_padding // 2
                 pad_right = w_padding - pad_left
 
-                # Pad with white (value=1.0)
-                img = torch.nn.functional.pad(
-                    img, (pad_left, pad_right, pad_top, pad_bottom), mode="constant", value=1.0
+                # Pad with white (value=0.0)
+                img = F.pad(
+                    img, (pad_left, pad_right, pad_top, pad_bottom), mode="constant", value=0.0
                 )
+
+        # Handle alpha channel
+        if img.shape[0] == 4:
+            mask = img[3]
+            img = img[:3]
+            bg_col = bg_map.get(background_color, (1.0, 1.0, 1.0))
+            bg = img.new_tensor(bg_col).view(3, 1, 1)
+            img = img * mask + bg * (1 - mask)
+        else:
+            mask = torch.ones_like(img[0])
 
         shapes.add((img.shape[1], img.shape[2]))
         images.append(img)
+        masks.append(mask.unsqueeze(0))
 
     # Check if we have different shapes
     # In theory our model can also work well with different shapes
@@ -203,7 +250,8 @@ def load_and_preprocess_images(image_path_list, mode="crop"):
 
         # Pad images if necessary
         padded_images = []
-        for img in images:
+        padded_masks = []
+        for img, mask in zip(images, masks):
             h_padding = max_height - img.shape[1]
             w_padding = max_width - img.shape[2]
 
@@ -213,13 +261,25 @@ def load_and_preprocess_images(image_path_list, mode="crop"):
                 pad_left = w_padding // 2
                 pad_right = w_padding - pad_left
 
-                img = torch.nn.functional.pad(
+                if mask is None:
+                    mask = torch.ones_like(img[0])
+
+                mask = F.pad(
+                    mask, (pad_left, pad_right, pad_top, pad_bottom), mode="constant", value=0.0
+                )
+
+                img = F.pad(
                     img, (pad_left, pad_right, pad_top, pad_bottom), mode="constant", value=1.0
                 )
+
             padded_images.append(img)
+            padded_masks.append(mask)
+
         images = padded_images
+        masks = padded_masks
 
     images = torch.stack(images)  # concatenate images
+    masks = torch.stack(masks)
 
     # Ensure correct shape when single image
     if len(image_path_list) == 1:
@@ -227,4 +287,8 @@ def load_and_preprocess_images(image_path_list, mode="crop"):
         if images.dim() == 3:
             images = images.unsqueeze(0)
 
-    return images
+        #Verify mask is (1, 1, H, W)
+        if masks.dim() == 3:
+            masks = masks.unsqueeze(0)
+
+    return images, masks
