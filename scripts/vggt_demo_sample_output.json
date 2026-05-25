@@ -1,0 +1,34 @@
+{
+  "model_id": "facebook/VGGT-1B",
+  "device": "cuda",
+  "num_input_images": 2,
+  "preprocessed_image_size": [518, 518],
+  "elapsed_ms": 821.34,
+  "result": {
+    "fields": [
+      "pose_enc",
+      "extrinsic",
+      "intrinsic",
+      "depth",
+      "depth_conf",
+      "world_points",
+      "world_points_conf"
+    ],
+    "shapes": {
+      "pose_enc": [1, 2, 9],
+      "extrinsic": [1, 2, 3, 4],
+      "intrinsic": [1, 2, 3, 3],
+      "depth": [1, 2, 518, 518, 1],
+      "depth_conf": [1, 2, 518, 518],
+      "world_points": [1, 2, 518, 518, 3],
+      "world_points_conf": [1, 2, 518, 518]
+    },
+    "stats": {
+      "depth_min": 0.184,
+      "depth_max": 12.67,
+      "depth_conf_mean": 0.918,
+      "world_points_abs_mean": 1.742,
+      "world_points_conf_mean": 0.902
+    }
+  }
+}

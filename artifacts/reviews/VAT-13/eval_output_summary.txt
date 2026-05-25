@@ -1,0 +1,11 @@
+Command: cd /Users/vince/Documents/intelligent-photographer && bash scripts/run_vggt_demo.sh
+Exit code: 0
+
+Observed output:
+- curl to http://192.168.1.10:18080/infer failed: connection refused/unreachable in this environment.
+- Script automatically used sample fallback response.
+- Printed VGGT result fields and shapes:
+  pose_enc, extrinsic, intrinsic, depth, depth_conf, world_points, world_points_conf
+
+Environment note:
+- SSH to dev machine (192.168.1.10:22) is unreachable from this runtime, so live remote deployment validation could not be completed here.
