@@ -537,7 +537,6 @@ class Trainer:
                 batch = self._process_batch(batch, 'val', local_data_ids)
             batch = copy_data_to_device(batch, self.device)
 
-            import pdb; pdb.set_trace()
             # compute output
             with torch.no_grad():
                 with torch.cuda.amp.autocast(

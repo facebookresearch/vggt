@@ -316,13 +316,13 @@ def regression_loss(pred, gt, mask, conf=None, gradient_loss_fn=None, gamma=1.0,
     loss_grad = 0
 
     # Prepare confidence for gradient loss if needed
-    if "conf" in gradient_loss_fn:
+    if gradient_loss_fn is not None and "conf" in gradient_loss_fn:
         to_feed_conf = conf.reshape(bb*ss, hh, ww)
     else:
         to_feed_conf = None
 
     # Compute gradient loss if specified for spatial smoothness
-    if "normal" in gradient_loss_fn:
+    if gradient_loss_fn is not None and "normal" in gradient_loss_fn:
         # Surface normal-based gradient loss
         loss_grad = gradient_loss_multi_scale_wrapper(
             pred.reshape(bb*ss, hh, ww, nc),
@@ -332,7 +332,7 @@ def regression_loss(pred, gt, mask, conf=None, gradient_loss_fn=None, gamma=1.0,
             scales=3,
             conf=to_feed_conf,
         )
-    elif "grad" in gradient_loss_fn:
+    elif gradient_loss_fn is not None and "grad" in gradient_loss_fn:
         # Standard gradient-based loss
         loss_grad = gradient_loss_multi_scale_wrapper(
             pred.reshape(bb*ss, hh, ww, nc),
