@@ -107,7 +107,7 @@ class VKittiDataset(BaseDataset):
         Returns:
             dict: A batch of data including images, depths, and other metadata.
         """
-        if self.inside_random and self.training:
+        if self.inside_random:
             seq_index = random.randint(0, self.sequence_list_len - 1)
 
         if seq_name is None:
