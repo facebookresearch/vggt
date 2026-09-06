@@ -40,4 +40,4 @@ python test_relpose.py --data_dir data/re10k/ --anno_dir annotations/re10k/test.
 I have not thoroughly tested this code outside of my own setup, so there might be some small edits you need to make to make it work for you (e.g. changing the absolute filepaths in the configs and designing your own sbatch script). If you want to add your own model, you can see in `vggt/models/aggregator_small.py` how to do this.
 
 ## Checkpoints
-If you want the MuM, DINOv3 and CroCo v2 checkpoints, you can email davnords@chalmers.se and we can sort out a way to transfer them. They are quite large (4GB per checkpoint), so I could not upload them to GitHub releases without sharding them.
+I have put them out as a GitHub release. They can be found [here](https://github.com/davnords/vggt/releases/tag/weights).
