@@ -97,6 +97,10 @@ For long multi-view sequences, full-context streamed Aggregator inference can be
 `model.eval().set_inference_token_chunk_size(16384)`. Smaller chunks use less peak memory but add
 more overhead while keeping the complete multi-view attention context. Pass `None` to restore the default path.
 
+Streaming changes the shapes of the projection and attention operations, so results can differ from the default
+path by normal floating-point rounding. Iterative tracking may amplify those differences for low-confidence
+points; validate the chunk size against the outputs that matter for your application.
+
 The model weights will be automatically downloaded from Hugging Face. If you encounter issues such as slow loading, you can manually download them [here](https://huggingface.co/facebook/VGGT-1B/blob/main/model.pt) and load, or:
 
 ```python

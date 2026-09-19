@@ -116,7 +116,7 @@ class Block(nn.Module):
         """Stream independent batch items to bound frame-block activations."""
         batch_size, tokens_per_item, _ = x.shape
         items_per_chunk = max(1, chunk_size // tokens_per_item)
-        output = torch.empty_like(x)
+        output = None
 
         for start in range(0, batch_size, items_per_chunk):
             end = min(start + items_per_chunk, batch_size)
@@ -124,6 +124,8 @@ class Block(nn.Module):
             pos_chunk = pos[start:end] if pos is not None else None
             x_chunk = x_chunk + self.ls1(self.attn(self.norm1(x_chunk), pos=pos_chunk))
             x_chunk = x_chunk + self.ls2(self.mlp(self.norm2(x_chunk)))
+            if output is None:
+                output = torch.empty_like(x, dtype=x_chunk.dtype)
             output[start:end] = x_chunk
 
         return output
@@ -136,12 +138,16 @@ class Block(nn.Module):
         forward in eval mode with gradients disabled.
         """
         if x.shape[0] > 1:
-            output = torch.empty_like(x)
+            output = None
             for batch_idx in range(x.shape[0]):
                 pos_item = pos[batch_idx : batch_idx + 1] if pos is not None else None
-                output[batch_idx : batch_idx + 1] = self._forward_streamed_inference(
+                output_item = self._forward_streamed_inference(
                     x[batch_idx : batch_idx + 1], pos_item, chunk_size
                 )
+                if output is None:
+                    output = torch.empty_like(x, dtype=output_item.dtype)
+                output[batch_idx : batch_idx + 1] = output_item
+                del output_item
             return output
 
         attn = self.attn
@@ -180,7 +186,7 @@ class Block(nn.Module):
             v[:, :, start:end] = v_chunk
             del k_chunk, v_chunk
 
-        x_attn = torch.empty_like(x)
+        x_attn = None
         for start in range(0, N, chunk_size):
             end = min(start + chunk_size, N)
             normed = self.norm1(x[:, start:end])
@@ -193,21 +199,33 @@ class Block(nn.Module):
             attended = F.scaled_dot_product_attention(q, k, v, dropout_p=0.0)
             attended = attended.transpose(1, 2).reshape(B, end - start, C)
             attended = attn.proj_drop(attn.proj(attended))
-            x_attn[:, start:end] = x[:, start:end] + self.ls1(attended)
-            del normed, q, attended
+            x_chunk = x[:, start:end] + self.ls1(attended)
+            if x_attn is None:
+                x_attn = torch.empty_like(x, dtype=x_chunk.dtype)
+            x_attn[:, start:end] = x_chunk
+            del normed, q, attended, x_chunk
 
         del k, v
 
         # The MLP is token-wise, so its residual can be evaluated and committed
         # chunk-by-chunk without changing cross-token semantics.
+        output = x_attn
         for start in range(0, N, chunk_size):
             end = min(start + chunk_size, N)
             x_chunk = x_attn[:, start:end]
             residual = self.ls2(self.mlp(self.norm2(x_chunk)))
-            x_attn[:, start:end].add_(residual)
+            if start == 0:
+                output_dtype = torch.promote_types(x_chunk.dtype, residual.dtype)
+                if output_dtype != x_attn.dtype:
+                    # Keep later MLP inputs in their original attention dtype.
+                    output = torch.empty_like(x_attn, dtype=output_dtype)
+            if output is x_attn:
+                x_chunk.add_(residual)
+            else:
+                output[:, start:end] = x_chunk + residual
             del x_chunk, residual
 
-        return x_attn
+        return output
 
 def drop_add_residual_stochastic_depth(
     x: Tensor, residual_func: Callable[[Tensor], Tensor], sample_drop_ratio: float = 0.0, pos=None

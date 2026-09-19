@@ -141,3 +141,34 @@ def test_batch_streamed_frame_path_matches_baseline(use_rope):
         output = block(x, pos=pos)
 
     torch.testing.assert_close(output, reference, rtol=2e-5, atol=2e-6)
+
+
+@pytest.mark.parametrize(
+    "shape,chunk_size",
+    [((1, 37, 32), 8), ((2, 37, 32), 8), ((5, 8, 32), 16)],
+    ids=["tokens", "recursive_batch", "batch_items"],
+)
+@pytest.mark.parametrize("promoted_residual", ["attention", "mlp", "both"])
+def test_streamed_block_preserves_autocast_residual_dtype(shape, chunk_size, promoted_residual):
+    torch.manual_seed(123)
+    block = Block(dim=32, num_heads=4, mlp_ratio=2.0, init_values=0.01, qk_norm=True).eval()
+    if promoted_residual == "mlp":
+        block.ls1.to(dtype=torch.bfloat16)
+    elif promoted_residual == "attention":
+        block.ls2.to(dtype=torch.bfloat16)
+    x = torch.randn(shape).to(torch.bfloat16)
+    original = x.clone()
+
+    with torch.no_grad(), torch.autocast("cpu", dtype=torch.bfloat16):
+        reference = block(x)
+        block.inference_chunk_size = chunk_size
+        output = block(x)
+        saved_output = output.clone()
+        block(x + 0.25)
+
+    # FP32 LayerScale promotes either residual independently of the input dtype.
+    assert reference.dtype == torch.float32
+    torch.testing.assert_close(output, reference, rtol=2e-5, atol=2e-6)
+    torch.testing.assert_close(x, original, rtol=0.0, atol=0.0)
+    torch.testing.assert_close(output, saved_output, rtol=0.0, atol=0.0)
+    assert output.untyped_storage().data_ptr() != x.untyped_storage().data_ptr()
