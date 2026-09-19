@@ -142,6 +142,19 @@ class Aggregator(nn.Module):
             self.register_buffer(name, torch.FloatTensor(value).view(1, 1, 3, 1, 1), persistent=False)
 
         self.use_reentrant = False # hardcoded to False
+        self.inference_token_chunk_size = None
+
+    def set_inference_token_chunk_size(self, chunk_size: Optional[int]):
+        """Configure full-context streamed inference for attention blocks."""
+        if chunk_size is not None and (
+            isinstance(chunk_size, bool) or not isinstance(chunk_size, int) or chunk_size <= 0
+        ):
+            raise ValueError("inference_token_chunk_size must be a positive integer or None")
+        self.inference_token_chunk_size = chunk_size
+        for block in (*self.frame_blocks, *self.global_blocks):
+            if isinstance(block, Block):
+                block.inference_chunk_size = chunk_size
+        return self
 
     def __build_patch_embed__(
         self,

@@ -26,6 +26,11 @@ class VGGT(nn.Module, PyTorchModelHubMixin):
         self.depth_head = DPTHead(dim_in=2 * embed_dim, output_dim=2, activation="exp", conf_activation="expp1") if enable_depth else None
         self.track_head = TrackHead(dim_in=2 * embed_dim, patch_size=patch_size) if enable_track else None
 
+    def set_inference_token_chunk_size(self, chunk_size=None):
+        """Configure full-context memory-efficient Aggregator inference."""
+        self.aggregator.set_inference_token_chunk_size(chunk_size)
+        return self
+
     def forward(self, images: torch.Tensor, query_points: torch.Tensor = None):
         """
         Forward pass of the VGGT model.
