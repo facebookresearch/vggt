@@ -92,6 +92,11 @@ with torch.no_grad():
         predictions = model(images)
 ```
 
+For long multi-view sequences, full-context streamed Aggregator inference can be enabled under
+`torch.no_grad()`/`torch.inference_mode()`, for example with
+`model.eval().set_inference_token_chunk_size(16384)`. Smaller chunks use less peak memory but add
+more overhead while keeping the complete multi-view attention context. Pass `None` to restore the default path.
+
 The model weights will be automatically downloaded from Hugging Face. If you encounter issues such as slow loading, you can manually download them [here](https://huggingface.co/facebook/VGGT-1B/blob/main/model.pt) and load, or:
 
 ```python
