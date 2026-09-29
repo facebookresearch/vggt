@@ -83,7 +83,7 @@ def iterative_undistortion(params, tracks_normalized, max_iterations=100, max_st
         J_10 = (apply_distortion(params, u + step_u, v)[1] - apply_distortion(params, u - step_u, v)[1]) / (2 * step_u)
         J_11 = (apply_distortion(params, u, v + step_v)[1] - apply_distortion(params, u, v - step_v)[1]) / (2 * step_v)
 
-        J = torch.stack([torch.stack([J_00 + 1, J_01], dim=-1), torch.stack([J_10, J_11 + 1], dim=-1)], dim=-2)
+        J = torch.stack([torch.stack([J_00, J_01], dim=-1), torch.stack([J_10, J_11], dim=-1)], dim=-2)
 
         delta = torch.linalg.solve(J, torch.stack([dx, dy], dim=-1))
 
