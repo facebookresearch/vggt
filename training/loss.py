@@ -471,7 +471,7 @@ def gradient_loss(prediction, target, mask, conf=None, gamma=1.0, alpha=0.2):
 
     # Compute difference between prediction and target
     diff = prediction - target
-    diff = torch.mul(mask, diff)
+    diff = torch.where(mask.bool(), diff, 0)
 
     # Compute gradients in x direction (horizontal)
     grad_x = torch.abs(diff[:, :, 1:] - diff[:, :, :-1])
@@ -490,22 +490,19 @@ def gradient_loss(prediction, target, mask, conf=None, gamma=1.0, alpha=0.2):
     # Apply confidence weighting if provided
     if conf is not None:
         conf = conf[..., None].expand(-1, -1, -1, prediction.shape[-1])
-        conf_x = conf[:, :, 1:]
-        conf_y = conf[:, 1:, :]
+        # The confidence penalty belongs to the same valid edges as the
+        # residual. Use a safe value before log for excluded edges.
+        conf_x = torch.where(mask_x.bool(), conf[:, :, 1:], 1)
+        conf_y = torch.where(mask_y.bool(), conf[:, 1:, :], 1)
 
-        grad_x = gamma * grad_x * conf_x - alpha * torch.log(conf_x)
-        grad_y = gamma * grad_y * conf_y - alpha * torch.log(conf_y)
+        grad_x = (gamma * grad_x * conf_x - alpha * torch.log(conf_x)) * mask_x
+        grad_y = (gamma * grad_y * conf_y - alpha * torch.log(conf_y)) * mask_y
 
     # Sum gradients and normalize by number of valid pixels
     grad_loss = torch.sum(grad_x, (1, 2, 3)) + torch.sum(grad_y, (1, 2, 3))
     divisor = torch.sum(M)
 
-    if divisor == 0:
-        return 0
-    else:
-        grad_loss = torch.sum(grad_loss) / divisor
-
-    return grad_loss
+    return torch.sum(grad_loss) / divisor.clamp_min(1)
 
 
 def point_map_to_normal(point_map, mask, eps=1e-6):
