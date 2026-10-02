@@ -122,4 +122,6 @@ def inverse_log_transform(y):
     Returns:
         Transformed tensor
     """
-    return torch.sign(y) * (torch.expm1(torch.abs(y)))
+    # A nonzero branch sign preserves the unit derivative at the origin.
+    sign = torch.where(y >= 0, 1, -1)
+    return sign * torch.expm1(sign * y)
