@@ -33,10 +33,15 @@ def unproject_depth_map_to_point_map(
     if isinstance(intrinsics_cam, torch.Tensor):
         intrinsics_cam = intrinsics_cam.cpu().numpy()
 
+    if depth_map.ndim == 4 and depth_map.shape[-1] == 1:
+        depth_map = depth_map[..., 0]
+    elif depth_map.ndim != 3:
+        raise ValueError("depth_map must have shape (S, H, W) or (S, H, W, 1)")
+
     world_points_list = []
     for frame_idx in range(depth_map.shape[0]):
         cur_world_points, _, _ = depth_to_world_coords_points(
-            depth_map[frame_idx].squeeze(-1), extrinsics_cam[frame_idx], intrinsics_cam[frame_idx]
+            depth_map[frame_idx], extrinsics_cam[frame_idx], intrinsics_cam[frame_idx]
         )
         world_points_list.append(cur_world_points)
     world_points_array = np.stack(world_points_list, axis=0)
