@@ -200,7 +200,8 @@ def visualize_tracks_on_images(
         frame_path = os.path.join(out_dir, f"frame_{s:04d}.png")
         # Convert to BGR for OpenCV imwrite
         frame_bgr = cv2.cvtColor(img_rgb, cv2.COLOR_RGB2BGR)
-        cv2.imwrite(frame_path, frame_bgr)
+        if not cv2.imwrite(frame_path, frame_bgr):
+            raise OSError(f"Could not write track frame to {frame_path}")
 
         frame_images.append(img_rgb)
 
@@ -233,7 +234,8 @@ def visualize_tracks_on_images(
         out_path = os.path.join(out_dir, "tracks_grid.png")
         # Convert back to BGR for OpenCV imwrite
         grid_img_bgr = cv2.cvtColor(grid_img, cv2.COLOR_RGB2BGR)
-        cv2.imwrite(out_path, grid_img_bgr)
+        if not cv2.imwrite(out_path, grid_img_bgr):
+            raise OSError(f"Could not write track grid to {out_path}")
         print(f"[INFO] Saved color-by-XY track visualization grid -> {out_path}")
 
     print(f"[INFO] Saved {S} individual frames to {out_dir}/frame_*.png")
