@@ -822,6 +822,7 @@ class Trainer:
 
 def chunk_batch_for_accum_steps(batch: Mapping, accum_steps: int) -> List[Mapping]:
     """Splits a batch into smaller chunks for gradient accumulation."""
+    accum_steps = min(accum_steps, len(batch["images"]))
     if accum_steps == 1:
         return [batch]
     return [get_chunk_from_data(batch, i, accum_steps) for i in range(accum_steps)]
