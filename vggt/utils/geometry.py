@@ -156,7 +156,7 @@ def closed_form_inverse_se3(se3, R=None, T=None):
         R_transposed = np.transpose(R, (0, 2, 1))
         # -R^T t for NumPy
         top_right = -np.matmul(R_transposed, T)
-        inverted_matrix = np.tile(np.eye(4), (len(R), 1, 1))
+        inverted_matrix = np.tile(np.eye(4, dtype=se3.dtype), (len(R), 1, 1))
     else:
         R_transposed = R.transpose(1, 2)  # (N,3,3)
         top_right = -torch.bmm(R_transposed, T)  # (N,3,1)
