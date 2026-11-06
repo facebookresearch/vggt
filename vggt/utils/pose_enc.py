@@ -112,7 +112,7 @@ def pose_encoding_to_extri_intri(
             H, W = image_size_hw
             fy = (H / 2.0) / torch.tan(fov_h / 2.0)
             fx = (W / 2.0) / torch.tan(fov_w / 2.0)
-            intrinsics = torch.zeros(pose_encoding.shape[:2] + (3, 3), device=pose_encoding.device)
+            intrinsics = pose_encoding.new_zeros(pose_encoding.shape[:2] + (3, 3))
             intrinsics[..., 0, 0] = fx
             intrinsics[..., 1, 1] = fy
             intrinsics[..., 0, 2] = W / 2
