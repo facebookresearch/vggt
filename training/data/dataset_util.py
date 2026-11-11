@@ -604,11 +604,11 @@ def adjust_track_rot90(track, image_width, image_height, clockwise):
             A new track of shape (N, 2) after rotation.
     """
     if clockwise:
-        # (x, y) -> (y, image_width - 1 - x)
-        new_track = np.stack((track[:, 1], image_width - 1 - track[:, 0]), axis=-1)
-    else:
         # (x, y) -> (image_height - 1 - y, x)
         new_track = np.stack((image_height - 1 - track[:, 1], track[:, 0]), axis=-1)
+    else:
+        # (x, y) -> (y, image_width - 1 - x)
+        new_track = np.stack((track[:, 1], image_width - 1 - track[:, 0]), axis=-1)
 
     return new_track
 
